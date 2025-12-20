@@ -1,0 +1,2 @@
+liblibsndfile1
+ffmpeg
