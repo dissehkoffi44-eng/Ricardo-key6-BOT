@@ -20,7 +20,7 @@ except ImportError:
     MUTAGEN_AVAILABLE = False
 
 # --- CONFIGURATION ---
-st.set_page_config(page_title="Ricardo_DJ228 | V5 Ultra Pro", page_icon="🎧", layout="wide")
+st.set_page_config(page_title="Ricardo_DJ228 | V6 Ultra Précise", page_icon="🎧", layout="wide")
 
 # Paramètres Telegram (À remplir)
 TELEGRAM_TOKEN = "TON_TOKEN_BOT_ICI"
@@ -205,7 +205,7 @@ def get_full_analysis(file_buffer):
     }
 
 # --- INTERFACE ---
-st.markdown("<h1 style='text-align: center;'>🎧 RICARDO_DJ228 | V5 ULTRA PRO</h1>", unsafe_allow_html=True)
+st.markdown("<h1 style='text-align: center;'>🎧 RICARDO_DJ228 | V6 Ultra Précise</h1>", unsafe_allow_html=True)
 
 files = st.file_uploader("📂 DÉPOSEZ VOS TRACKS ICI (OU CLIQUEZ)", type=['mp3', 'wav', 'flac'], accept_multiple_files=True)
 
