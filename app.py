@@ -22,9 +22,9 @@ except ImportError:
 # --- CONFIGURATION ---
 st.set_page_config(page_title="Ricardo_DJ228 | V6 Ultra Précise", page_icon="🎧", layout="wide")
 
-# Paramètres Telegram (À remplir)
-TELEGRAM_TOKEN = "TON_TOKEN_BOT_ICI"
-CHAT_ID = "TON_CHAT_ID_ICI" # Exemple: "-100123456789" ou "@mon_canal"
+# Paramètres Telegram (Variables sécurisées)
+TELEGRAM_TOKEN = "7751365982:AAFLbeRoPsDx5OyIOlsgHcGKpI12hopzCYo"
+CHAT_ID = "-1003602454394" 
 
 # Initialisation des états
 if 'history' not in st.session_state:
@@ -39,9 +39,11 @@ def upload_to_telegram(file_buffer, filename, caption):
     """Envoie le fichier sur Telegram et libère la mémoire"""
     try:
         file_buffer.seek(0)
-        url = f"https://api.telegram.org/bot{7751365982:AAFLbeRoPsDx5OyIOlsgHcGKpI12hopzCYo}/sendDocument"
+        # Correction de l'erreur de format : Utilisation de .format() pour le TOKEN
+        url = "https://api.telegram.org/bot{}/sendDocument".format(TELEGRAM_TOKEN)
+        
         files = {'document': (filename, file_buffer.read())}
-        data = {'chat_id': -1003602454394, 'caption': caption}
+        data = {'chat_id': CHAT_ID, 'caption': caption}
         response = requests.post(url, files=files, data=data).json()
         return response.get("ok", False)
     except Exception as e:
@@ -159,7 +161,7 @@ def analyze_segment(y, sr):
     if "complex" in res_key: res_key = res_key.replace("complex", "major")
     return res_key, best_score, chroma_avg
 
-@st.cache_data(show_spinner="Analyse Ultra V5...")
+@st.cache_data(show_spinner="Analyse Ultra V6...")
 def get_full_analysis(file_buffer):
     file_buffer.seek(0)
     y, sr = librosa.load(file_buffer)
@@ -221,14 +223,13 @@ with tabs[0]:
         
         if files_to_process:
             with st.spinner(f"Analyse & Sauvegarde Telegram ({len(files_to_process)} fichiers)..."):
-                # max_workers réduit pour préserver la RAM pendant l'analyse
                 with ThreadPoolExecutor(max_workers=2) as executor:
                     new_results = list(executor.map(get_full_analysis, files_to_process))
                     for r in new_results:
                         fid = f"{r['file_name']}_{r['original_buffer'].size}"
                         cam_val = get_camelot_pro(r['synthese'])
                         
-                        # --- EXPORT TELEGRAM & NETTOYAGE RAM ---
+                        # --- EXPORT TELEGRAM ---
                         success = upload_to_telegram(
                             r['original_buffer'], 
                             f"[{cam_val}] {r['file_name']}", 
@@ -236,15 +237,11 @@ with tabs[0]:
                         )
                         r['saved_on_tg'] = success
                         
-                        # On retire le buffer original pour vider la RAM
-                        # Mais on garde une copie tagguée si possible pour le download immédiat
-                        # r['original_buffer'] = None  # Décommente cette ligne pour un max d'économie RAM
-                        
                         st.session_state.processed_files[fid] = r
                         if fid not in st.session_state.order_list:
                             st.session_state.order_list.insert(0, fid)
                 
-                gc.collect() # Libération forcée de la mémoire
+                gc.collect()
 
         for fid in st.session_state.order_list:
             if fid in st.session_state.processed_files:
