@@ -125,16 +125,17 @@ def get_tagged_audio(file_buffer, key_val):
         return output
     except: return file_buffer
 
-# --- MOTEUR ANALYSE AVANCÉE (CENS + WEIGHTING) ---
+# --- MOTEUR ANALYSE AVANCÉE (CENS + TUNING COMPENSATION) ---
 def check_drum_alignment(y, sr):
     flatness = np.mean(librosa.feature.spectral_flatness(y=y))
     chroma = librosa.feature.chroma_cqt(y=y, sr=sr)
     chroma_max_mean = np.mean(np.max(chroma, axis=0))
     return flatness < 0.045 or chroma_max_mean > 0.75
 
-def analyze_segment(y, sr):
+def analyze_segment(y, sr, tuning=0.0):
     NOTES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
-    chroma = librosa.feature.chroma_cens(y=y, sr=sr, hop_length=512, n_chroma=12)
+    # Utilisation du tuning estimé pour recaler le CENS
+    chroma = librosa.feature.chroma_cens(y=y, sr=sr, hop_length=512, n_chroma=12, tuning=tuning)
     chroma_avg = np.mean(chroma, axis=1)
     PROFILES = {
         "major": [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88], 
@@ -149,16 +150,17 @@ def analyze_segment(y, sr):
                 best_score, res_key = score, f"{NOTES[i]} {mode}"
     return res_key, best_score, chroma_avg
 
-@st.cache_data(show_spinner="Analyse Multi-Couches V6.1...")
+@st.cache_data(show_spinner="Analyse Multi-Couches V6.1 Hybrid...")
 def get_full_analysis(file_buffer):
-    # --- DÉBUT MODIFICATION ÉTAPE 2 ---
     file_buffer.seek(0)
     try:
         y, sr = librosa.load(file_buffer, sr=None)
     except Exception:
         file_buffer.seek(0)
         y, sr = librosa.load(io.BytesIO(file_buffer.read()), sr=None)
-    # --- FIN MODIFICATION ÉTAPE 2 ---
+
+    # Estimation du Tuning (Correction de l'accordage importée du Code 1)
+    tuning_offset = librosa.estimate_tuning(y=y, sr=sr)
 
     is_aligned = check_drum_alignment(y, sr)
     y_final, filter_applied = (y, False) if is_aligned else (librosa.effects.hpss(y)[0], True)
@@ -168,7 +170,7 @@ def get_full_analysis(file_buffer):
     
     for start_t in range(0, int(duration) - 10, 10):
         y_seg = y_final[int(start_t*sr):int((start_t+10)*sr)]
-        key_seg, score_seg, chroma_vec = analyze_segment(y_seg, sr)
+        key_seg, score_seg, chroma_vec = analyze_segment(y_seg, sr, tuning=tuning_offset)
         votes.append(key_seg)
         all_chromas.append(chroma_vec)
         timeline_data.append({"Temps": start_t, "Note": key_seg, "Confiance": round(score_seg * 100, 1)})
@@ -272,7 +274,7 @@ with tabs[0]:
                     st.markdown("---")
                     d1, d2, d3 = st.columns([1, 1, 2])
                     with d1: st.markdown(f"<div class='diag-box'><div class='label-custom'>PURETÉ</div><div style='color:{'#2ECC71' if res['purity'] > 75 else '#F1C40F'}; font-weight:bold;'>{res['purity']}%</div></div>", unsafe_allow_html=True)
-                    with d2: st.markdown(f"<div class='diag-box'><div class='label-custom'>CERVEAU</div><div style='color:#6366F1; font-weight:bold;'>CENS V6.1</div></div>", unsafe_allow_html=True)
+                    with d2: st.markdown(f"<div class='diag-box'><div class='label-custom'>CERVEAU</div><div style='color:#6366F1; font-weight:bold;'>CENS V6.1 + TUNING</div></div>", unsafe_allow_html=True)
                     with d3:
                         if res['key_shift']: st.warning(f"Changement détecté : {res['secondary']}")
                         else: st.success("Structure harmonique parfaite.")
