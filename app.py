@@ -39,9 +39,9 @@ def upload_to_telegram(file_buffer, filename, caption):
     """Envoie le fichier sur Telegram et libère la mémoire"""
     try:
         file_buffer.seek(0)
-        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendDocument"
+        url = f"https://api.telegram.org/bot{7751365982:AAFLbeRoPsDx5OyIOlsgHcGKpI12hopzCYo}/sendDocument"
         files = {'document': (filename, file_buffer.read())}
-        data = {'chat_id': CHAT_ID, 'caption': caption}
+        data = {'chat_id': -1003602454394, 'caption': caption}
         response = requests.post(url, files=files, data=data).json()
         return response.get("ok", False)
     except Exception as e:
