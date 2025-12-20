@@ -11,17 +11,16 @@ from concurrent.futures import ThreadPoolExecutor
 import requests  
 import gc        
 
-# --- IMPORT POUR LES TAGS (MUTAGEN) ---
+# --- IMPORT POUR LES TAGS MP3 (MUTAGEN) ---
 try:
     from mutagen.id3 import ID3, TKEY
     from mutagen.mp3 import MP3
-    from mutagen.mp4 import MP4, MP4Tags # Ajout pour le support M4A
     MUTAGEN_AVAILABLE = True
 except ImportError:
     MUTAGEN_AVAILABLE = False
 
 # --- CONFIGURATION ---
-st.set_page_config(page_title="Ricardo_DJ228 | V6.2 Pro M4A", page_icon="🎧", layout="wide")
+st.set_page_config(page_title="Ricardo_DJ228 | V6.1 Pro Digital", page_icon="🎧", layout="wide")
 
 # Paramètres Telegram
 TELEGRAM_TOKEN = "7751365982:AAFLbeRoPsDx5OyIOlsgHcGKpI12hopzCYo"
@@ -112,36 +111,21 @@ def get_camelot_pro(key_mode_str):
         else: return BASE_CAMELOT_MAJOR.get(key, "??")
     except: return "??"
 
-# --- FONCTION DE TAGGING UNIFIÉE (MP3 & M4A) ---
-def get_tagged_audio(file_buffer, key_val, filename):
+def get_tagged_audio(file_buffer, key_val):
     if not MUTAGEN_AVAILABLE: return file_buffer
     try:
         file_buffer.seek(0)
         audio_data = io.BytesIO(file_buffer.read())
-        
-        if filename.lower().endswith('.mp3'):
-            audio = MP3(audio_data)
-            if audio.tags is None: audio.add_tags()
-            audio.tags.add(TKEY(encoding=3, text=key_val))
-            output = io.BytesIO()
-            audio.save(output)
-            output.seek(0)
-            return output
-        
-        elif filename.lower().endswith('.m4a'):
-            audio = MP4(audio_data)
-            # Le tag '©key' est le standard pour la tonalité dans les fichiers MP4/M4A
-            audio.tags['©key'] = key_val
-            output = io.BytesIO()
-            audio.save(output)
-            output.seek(0)
-            return output
-            
-        return file_buffer
-    except:
-        return file_buffer
+        audio = MP3(audio_data)
+        if audio.tags is None: audio.add_tags()
+        audio.tags.add(TKEY(encoding=3, text=key_val))
+        output = io.BytesIO()
+        audio.save(output)
+        output.seek(0)
+        return output
+    except: return file_buffer
 
-# --- MOTEUR ANALYSE ---
+# --- MOTEUR ANALYSE AVANCÉE (CENS + WEIGHTING) ---
 def check_drum_alignment(y, sr):
     flatness = np.mean(librosa.feature.spectral_flatness(y=y))
     chroma = librosa.feature.chroma_cqt(y=y, sr=sr)
@@ -150,9 +134,12 @@ def check_drum_alignment(y, sr):
 
 def analyze_segment(y, sr):
     NOTES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
+    
+    # Amélioration : Utilisation du Chroma CENS pour lisser les accords complexes (Jazz/Riches)
     chroma = librosa.feature.chroma_cens(y=y, sr=sr, hop_length=512, n_chroma=12)
     chroma_avg = np.mean(chroma, axis=1)
     
+    # Pondération : On donne plus de poids aux quintes et aux toniques pour stabiliser
     PROFILES = {
         "major": [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88], 
         "minor": [6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17], 
@@ -168,10 +155,9 @@ def analyze_segment(y, sr):
     
     return res_key, best_score, chroma_avg
 
-@st.cache_data(show_spinner="Analyse Multi-Couches V6.2...")
+@st.cache_data(show_spinner="Analyse Multi-Couches V6.1...")
 def get_full_analysis(file_buffer):
     file_buffer.seek(0)
-    # librosa.load gère les M4A si ffmpeg est installé (via packages.txt)
     y, sr = librosa.load(file_buffer)
     is_aligned = check_drum_alignment(y, sr)
     y_final, filter_applied = (y, False) if is_aligned else (librosa.effects.hpss(y)[0], True)
@@ -179,6 +165,7 @@ def get_full_analysis(file_buffer):
     duration = librosa.get_duration(y=y_final, sr=sr)
     timeline_data, votes, all_chromas = [], [], []
     
+    # Découpage intelligent
     for start_t in range(0, int(duration) - 10, 10):
         y_seg = y_final[int(start_t*sr):int((start_t+10)*sr)]
         key_seg, score_seg, chroma_vec = analyze_segment(y_seg, sr)
@@ -186,6 +173,7 @@ def get_full_analysis(file_buffer):
         all_chromas.append(chroma_vec)
         timeline_data.append({"Temps": start_t, "Note": key_seg, "Confiance": round(score_seg * 100, 1)})
     
+    # Calcul de la stabilité harmonique
     dominante_vote = Counter(votes).most_common(1)[0][0]
     avg_chroma_global = np.mean(all_chromas, axis=0)
     
@@ -213,10 +201,9 @@ def get_full_analysis(file_buffer):
     }
 
 # --- INTERFACE ---
-st.markdown("<h1 style='text-align: center;'>🎧 RICARDO_DJ228 | V6.2 PRO M4A</h1>", unsafe_allow_html=True)
+st.markdown("<h1 style='text-align: center;'>🎧 RICARDO_DJ228 | V6.1 ULTRA-STABLE</h1>", unsafe_allow_html=True)
 
-# Extension m4a ajoutée ici
-files = st.file_uploader("📂 DÉPOSEZ VOS TRACKS ICI (MP3, M4A, WAV, FLAC)", type=['mp3', 'm4a', 'wav', 'flac'], accept_multiple_files=True)
+files = st.file_uploader("📂 DÉPOSEZ VOS TRACKS ICI", type=['mp3', 'wav', 'flac'], accept_multiple_files=True)
 
 tabs = st.tabs(["📁 ANALYSEUR", "🕒 HISTORIQUE"])
 
@@ -229,7 +216,7 @@ with tabs[0]:
                 files_to_process.append(f)
         
         if files_to_process:
-            with st.spinner(f"Analyse & Sauvegarde Telegram (Support M4A)..."):
+            with st.spinner(f"Analyse & Backup Telegram en cours..."):
                 with ThreadPoolExecutor(max_workers=2) as executor:
                     new_results = list(executor.map(get_full_analysis, files_to_process))
                     for r in new_results:
@@ -270,25 +257,29 @@ with tabs[0]:
                         st.markdown(f'<div class="metric-container" style="border-bottom: 4px solid #6366F1;"><div class="label-custom">SYNTHÈSE</div><div class="value-custom">{res["synthese"]}</div><div>{cam_final}</div></div>', unsafe_allow_html=True)
                         get_sine_witness(res["synthese"], f"synth_{fid}")
                         if file_buffer:
-                            # Utilisation de la nouvelle fonction de tagging MP3/M4A
-                            st.download_button(label="💾 TÉLÉCHARGER TAGGÉ", data=get_tagged_audio(file_buffer, cam_final, file_name), file_name=f"[{cam_final}] {file_name}", key=f"dl_{fid}")
+                            st.download_button(label="💾 MP3 TAGGÉ", data=get_tagged_audio(file_buffer, cam_final), file_name=f"[{cam_final}] {file_name}", mime="audio/mpeg", key=f"dl_{fid}")
                         if res.get('saved_on_tg'):
                             st.caption("✅ Backup envoyé sur Telegram")
                     
+                    df_tl = pd.DataFrame(res['timeline'])
+                    df_s = df_tl.sort_values(by="Confiance", ascending=False).reset_index()
+                    b_n = df_s.loc[0, 'Note']
+                    s_n = df_s[df_s['Note'] != b_n].iloc[0]['Note'] if not df_s[df_s['Note'] != b_n].empty else b_n
+                    
                     with c3:
-                        st.markdown(f'<div class="metric-container" style="border-bottom: 4px solid #F1C40F;"><div class="label-custom">CONFIANCE</div><div class="value-custom">{res["confidence"]}%</div><div>Pureté: {res["purity"]}%</div></div>', unsafe_allow_html=True)
+                        st.markdown(f'<div class="metric-container" style="border-bottom: 4px solid #F1C40F;"><div class="label-custom">STABILITÉ</div><div style="font-size:0.85em; margin-top:5px;">🥇 {b_n} <b>({get_camelot_pro(b_n)})</b></div><div style="font-size:0.85em;">🥈 {s_n} <b>({get_camelot_pro(s_n)})</b></div></div>', unsafe_allow_html=True)
                     
                     with c4: st.markdown(f'<div class="metric-container"><div class="label-custom">BPM & ENERGIE</div><div class="value-custom">{res["tempo"]}</div><div>E: {res["energy"]}/10</div></div>', unsafe_allow_html=True)
 
                     st.markdown("---")
                     d1, d2, d3 = st.columns([1, 1, 2])
-                    with d1: st.markdown(f"<div class='diag-box'><div class='label-custom'>FORMAT</div><div style='color:#6366F1; font-weight:bold;'>{file_name.split('.')[-1].upper()}</div></div>", unsafe_allow_html=True)
-                    with d2: st.markdown(f"<div class='diag-box'><div class='label-custom'>CERVEAU</div><div style='color:#2ECC71; font-weight:bold;'>CENS V6.2</div></div>", unsafe_allow_html=True)
+                    with d1: st.markdown(f"<div class='diag-box'><div class='label-custom'>PURETÉ</div><div style='color:{'#2ECC71' if res['purity'] > 75 else '#F1C40F'}; font-weight:bold;'>{res['purity']}%</div></div>", unsafe_allow_html=True)
+                    with d2: st.markdown(f"<div class='diag-box'><div class='label-custom'>CERVEAU</div><div style='color:#6366F1; font-weight:bold;'>CENS V6.1</div></div>", unsafe_allow_html=True)
                     with d3:
-                        if res['key_shift']: st.warning(f"Changement harmonique détecté.")
-                        else: st.success("Stabilité harmonique confirmée.")
+                        if res['key_shift']: st.warning(f"Changement détecté : {res['secondary']}")
+                        else: st.success("Structure harmonique parfaite.")
 
-                    st.plotly_chart(px.scatter(pd.DataFrame(res['timeline']), x="Temps", y="Note", color="Confiance", size="Confiance", template="plotly_white"), use_container_width=True)
+                    st.plotly_chart(px.scatter(df_tl, x="Temps", y="Note", color="Confiance", size="Confiance", template="plotly_white"), use_container_width=True)
 
 with tabs[1]:
     if st.session_state.history:
