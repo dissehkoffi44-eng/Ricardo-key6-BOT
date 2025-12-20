@@ -1,9 +1,9 @@
-streamlit==1.31.0
+streamlit>=1.31.0
 librosa==0.10.1
-numpy>=1.23.5,<2.0.0
-pandas
+numpy>=1.23.5,<1.26.0
+pandas>=2.0.0
 plotly
 mutagen
 requests
 soundfile==0.12.1
-numba==0.58.1
+numba==0.57.1
