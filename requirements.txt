@@ -1,6 +1,6 @@
-streamlit
-librosa
-numpy
+streamlit>=1.35.0
+librosa>=0.10.1
+numpy<2.0.0
 pandas
 plotly
 mutagen
