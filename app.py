@@ -9,7 +9,7 @@ import io
 import streamlit.components.v1 as components
 from concurrent.futures import ThreadPoolExecutor
 import requests  
-import gc        
+import gc         
 
 # --- IMPORT POUR LES TAGS MP3 (MUTAGEN) ---
 try:
@@ -134,38 +134,38 @@ def check_drum_alignment(y, sr):
 
 def analyze_segment(y, sr):
     NOTES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
-    
-    # Amélioration : Utilisation du Chroma CENS pour lisser les accords complexes (Jazz/Riches)
     chroma = librosa.feature.chroma_cens(y=y, sr=sr, hop_length=512, n_chroma=12)
     chroma_avg = np.mean(chroma, axis=1)
-    
-    # Pondération : On donne plus de poids aux quintes et aux toniques pour stabiliser
     PROFILES = {
         "major": [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88], 
         "minor": [6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17], 
         "dorian": [6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 2.69, 3.98, 3.34, 3.17]
     }
-    
     best_score, res_key = -1, ""
     for mode, profile in PROFILES.items():
         for i in range(12):
             score = np.corrcoef(chroma_avg, np.roll(profile, i))[0, 1]
             if score > best_score: 
                 best_score, res_key = score, f"{NOTES[i]} {mode}"
-    
     return res_key, best_score, chroma_avg
 
 @st.cache_data(show_spinner="Analyse Multi-Couches V6.1...")
 def get_full_analysis(file_buffer):
+    # --- DÉBUT MODIFICATION ÉTAPE 2 ---
     file_buffer.seek(0)
-    y, sr = librosa.load(file_buffer)
+    try:
+        y, sr = librosa.load(file_buffer, sr=None)
+    except Exception:
+        file_buffer.seek(0)
+        y, sr = librosa.load(io.BytesIO(file_buffer.read()), sr=None)
+    # --- FIN MODIFICATION ÉTAPE 2 ---
+
     is_aligned = check_drum_alignment(y, sr)
     y_final, filter_applied = (y, False) if is_aligned else (librosa.effects.hpss(y)[0], True)
     
     duration = librosa.get_duration(y=y_final, sr=sr)
     timeline_data, votes, all_chromas = [], [], []
     
-    # Découpage intelligent
     for start_t in range(0, int(duration) - 10, 10):
         y_seg = y_final[int(start_t*sr):int((start_t+10)*sr)]
         key_seg, score_seg, chroma_vec = analyze_segment(y_seg, sr)
@@ -173,7 +173,6 @@ def get_full_analysis(file_buffer):
         all_chromas.append(chroma_vec)
         timeline_data.append({"Temps": start_t, "Note": key_seg, "Confiance": round(score_seg * 100, 1)})
     
-    # Calcul de la stabilité harmonique
     dominante_vote = Counter(votes).most_common(1)[0][0]
     avg_chroma_global = np.mean(all_chromas, axis=0)
     
@@ -223,7 +222,6 @@ with tabs[0]:
                         fid = f"{r['file_name']}_{r['original_buffer'].size}"
                         cam_val = get_camelot_pro(r['synthese'])
                         
-                        # EXPORT TELEGRAM
                         success = upload_to_telegram(
                             r['original_buffer'], 
                             f"[{cam_val}] {r['file_name']}", 
