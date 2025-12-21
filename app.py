@@ -26,7 +26,9 @@ st.set_page_config(page_title="Ricardo_DJ228 | KEY 98% FIABLE", page_icon="🎧"
 TELEGRAM_TOKEN = "7751365982:AAFLbeRoPsDx5OyIOlsgHcGKpI12hopzCYo"
 CHAT_ID = "-1003602454394" 
 
-# Initialisation des états
+# Initialisation des états (AJOUT DE LA CLÉ ICI POUR ÉVITER L'ERREUR)
+if 'uploader_key' not in st.session_state:
+    st.session_state.uploader_key = "0"
 if 'history' not in st.session_state:
     st.session_state.history = []
 if 'processed_files' not in st.session_state:
@@ -198,16 +200,18 @@ with st.sidebar:
         st.rerun()
     st.info("Conseillé après 50 analyses pour libérer la RAM.")
 
-# --- ZONE D'IMPORTATION (MODIFIÉE POUR LE RESET) ---
-files = st.file_uploader("📂 DÉPOSEZ VOS TRACKS ICI", type=['mp3', 'wav', 'flac'], accept_multiple_files=True, key="uploader_key")
+# --- ZONE D'IMPORTATION ---
+files = st.file_uploader("📂 DÉPOSEZ VOS TRACKS ICI", type=['mp3', 'wav', 'flac'], accept_multiple_files=True, key=st.session_state.uploader_key)
 
 tabs = st.tabs(["📁 ANALYSEUR", "🕒 HISTORIQUE"])
 
 with tabs[0]:
     if files:
+        has_new_files = False
         for f in files:
             file_id = f"{f.name}_{f.size}"
             if file_id not in st.session_state.processed_files:
+                has_new_files = True
                 with st.spinner(f"Traitement : {f.name}"):
                     f_bytes = f.read()
                     res = get_full_analysis(f_bytes, f.name)
@@ -243,9 +247,10 @@ with tabs[0]:
                     del f_bytes
                     gc.collect()
 
-        # --- ACTION DE VIDAGE DU DRAG & DROP ---
-        st.session_state.uploader_key = str(datetime.now()) # Change la clé pour forcer le nettoyage
-        st.rerun()
+        # --- ACTION DE VIDAGE DU DRAG & DROP (VERSION SÉCURISÉE) ---
+        if has_new_files:
+            st.session_state.uploader_key = str(datetime.now())
+            st.rerun()
 
     # AFFICHAGE LIMITÉ AUX 10 DERNIERS POUR LA FLUIDITÉ
     st.subheader("Les 10 dernières analyses")
