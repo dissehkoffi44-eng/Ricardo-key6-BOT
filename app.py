@@ -26,13 +26,16 @@ st.set_page_config(page_title="Ricardo_DJ228 | KEY 98% FIABLE", page_icon="🎧"
 TELEGRAM_TOKEN = "7751365982:AAFLbeRoPsDx5OyIOlsgHcGKpI12hopzCYo"
 CHAT_ID = "-1003602454394" 
 
-# Initialisation des états
+# --- INITIALISATION DES ÉTATS ---
 if 'history' not in st.session_state:
     st.session_state.history = []
 if 'processed_files' not in st.session_state:
     st.session_state.processed_files = {}
 if 'order_list' not in st.session_state:
     st.session_state.order_list = []
+# On initialise la clé de l'uploader si elle n'existe pas
+if 'uploader_id' not in st.session_state:
+    st.session_state.uploader_id = 0
 
 # --- FONCTION STOCKAGE EXTERNE TELEGRAM ---
 def upload_to_telegram(file_buffer, filename, caption):
@@ -152,11 +155,9 @@ def get_full_analysis(file_bytes, file_name):
         all_chromas.append(chroma_vec)
         timeline_data.append({"Temps": start_t, "Note": key_seg, "Confiance": round(float(score_seg) * 100, 1)})
     
-    # Confiance de la dominante (vote majoritaire)
     counts = Counter(votes)
     dominante_vote = counts.most_common(1)[0][0]
     dominante_conf = int((counts[dominante_vote] / len(votes)) * 100)
-
     avg_chroma_global = np.mean(all_chromas, axis=0)
     
     PROFILES_SYNTH = {"major": [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88], "minor": [6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17]}
@@ -186,7 +187,6 @@ def get_full_analysis(file_bytes, file_name):
 # --- INTERFACE ---
 st.markdown("<h1 style='text-align: center;'>🎧 RICARDO_DJ228 | KEY 98% FIABLE</h1>", unsafe_allow_html=True)
 
-# Barre latérale pour maintenance
 with st.sidebar:
     st.header("⚙️ MAINTENANCE")
     if st.button("🧹 VIDER TOUT (REDÉMARRAGE)"):
@@ -196,17 +196,16 @@ with st.sidebar:
         st.cache_data.clear()
         gc.collect()
         st.rerun()
-    st.info("Conseillé après 50 analyses pour libérer la RAM.")
 
 # --- ZONE D'IMPORTATION ---
-# Utilisation d'une clé fixe mais réinitialisation manuelle
-files = st.file_uploader("📂 DÉPOSEZ VOS TRACKS ICI", type=['mp3', 'wav', 'flac'], accept_multiple_files=True, key="my_uploader")
+# Utilisation de la clé dynamique pour réinitialiser l'uploader
+files = st.file_uploader("📂 DÉPOSEZ VOS TRACKS ICI", type=['mp3', 'wav', 'flac'], accept_multiple_files=True, key=f"uploader_{st.session_state.uploader_id}")
 
 tabs = st.tabs(["📁 ANALYSEUR", "🕒 HISTORIQUE"])
 
 with tabs[0]:
     if files:
-        newly_processed = False
+        processed_something = False
         for f in files:
             file_id = f"{f.name}_{f.size}"
             if file_id not in st.session_state.processed_files:
@@ -227,31 +226,22 @@ with tabs[0]:
                                 c2_tg = row['Confiance']
                                 break
 
-                    tg_caption = (
-                        f"🎵 {f.name}\n"
-                        f"🥁 BPM: {res['tempo']}\n"
-                        f"🎯 DOMINANTE: {res['vote']} ({get_camelot_pro(res['vote'])}) - {res['vote_conf']}%\n"
-                        f"🧬 SYNTHÈSE: {res['synthese']} ({cam_val}) - {res['confidence']}%\n"
-                        f"⚖️ STABILITÉ:\n"
-                        f"   1️⃣ {n1_tg} ({get_camelot_pro(n1_tg)}) | {c1_tg}%\n"
-                        f"   2️⃣ {n2_tg} ({get_camelot_pro(n2_tg)}) | {c2_tg}%"
-                    )
+                    tg_caption = (f"🎵 {f.name}\n🥁 BPM: {res['tempo']}\n🎯 DOMINANTE: {res['vote']} ({get_camelot_pro(res['vote'])}) - {res['vote_conf']}%\n🧬 SYNTHÈSE: {res['synthese']} ({cam_val}) - {res['confidence']}%")
 
-                    success = upload_to_telegram(io.BytesIO(f_bytes), f"[{cam_val}] {f.name}", tg_caption)
-                    res['saved_on_tg'] = success
+                    upload_to_telegram(io.BytesIO(f_bytes), f"[{cam_val}] {f.name}", tg_caption)
                     st.session_state.processed_files[file_id] = res
                     if file_id not in st.session_state.order_list:
                         st.session_state.order_list.insert(0, file_id)
-                    del f_bytes
+                    processed_something = True
                     gc.collect()
-                    newly_processed = True
-
-        # Cette partie vide la liste "Drag files" sans casser le moteur de Streamlit
-        if newly_processed:
+        
+        # --- RÉINITIALISATION DE LA ZONE DE DÉPÔT ---
+        if processed_something:
+            st.session_state.uploader_id += 1 # On change l'ID pour forcer Streamlit à créer un nouvel uploader vide
             st.rerun()
 
-    # AFFICHAGE LIMITÉ AUX 10 DERNIERS POUR LA FLUIDITÉ
-    st.subheader("Les 10 dernières analyses")
+    # AFFICHAGE
+    st.subheader("Analyses récentes")
     for fid in st.session_state.order_list[:10]:
         res = st.session_state.processed_files[fid]
         file_name = res['file_name']
@@ -261,43 +251,14 @@ with tabs[0]:
                 st.session_state.history.insert(0, {"Date": datetime.now().strftime("%d/%m %H:%M"), "Fichier": file_name, "Note": res['synthese'], "Camelot": cam_final, "BPM": res['tempo']})
 
             c1, c2, c3, c4 = st.columns(4)
-            with c1: 
-                st.markdown(f'<div class="metric-container"><div class="label-custom">DOMINANTE</div><div class="value-custom">{res["vote"]}</div><div>{get_camelot_pro(res["vote"])} • {res["vote_conf"]}%</div></div>', unsafe_allow_html=True)
-                get_sine_witness(res["vote"], f"dom_{fid}")
-            with c2: 
-                st.markdown(f'<div class="metric-container" style="border-bottom: 4px solid #6366F1;"><div class="label-custom">SYNTHÈSE</div><div class="value-custom">{res["synthese"]}</div><div>{cam_final} • {res["confidence"]}%</div></div>', unsafe_allow_html=True)
-                get_sine_witness(res["synthese"], f"synth_{fid}")
-                if res.get('saved_on_tg'): st.caption("✅ Backup envoyé sur Telegram")
-            with c3:
-                df_tl = pd.DataFrame(res['timeline'])
-                df_s = df_tl.sort_values(by="Confiance", ascending=False).reset_index()
-                n1 = df_s.loc[0, 'Note'] if not df_s.empty else "??"
-                c1_val = df_s.loc[0, 'Confiance'] if not df_s.empty else 0
-                n2 = n1
-                c2_val = 0
-                if not df_s.empty:
-                    for idx, row in df_s.iterrows():
-                        if row['Note'] != n1:
-                            n2 = row['Note']
-                            c2_val = row['Confiance']
-                            break
-                st.markdown(f'<div class="metric-container" style="border-bottom: 4px solid #F1C40F;"><div class="label-custom">STABILITÉ</div><div style="font-size:0.85em; margin-top:5px;">🥇 {n1} ({get_camelot_pro(n1)}) <b>{c1_val}%</b></div><div style="font-size:0.85em;">🥈 {n2} ({get_camelot_pro(n2)}) <b>{c2_val}%</b></div></div>', unsafe_allow_html=True)
-            with c4: 
-                st.markdown(f'<div class="metric-container"><div class="label-custom">BPM & ENERGIE</div><div class="value-custom">{res["tempo"]}</div><div>E: {res["energy"]}/10</div></div>', unsafe_allow_html=True)
-
-            st.markdown("---")
-            d1, d3 = st.columns([1, 2])
-            with d1: st.markdown(f"<div class='diag-box'><div class='label-custom'>PURETÉ</div><div style='color:{'#2ECC71' if res['purity'] > 75 else '#F1C40F'}; font-weight:bold;'>{res['purity']}%</div></div>", unsafe_allow_html=True)
-            with d3:
-                if res['key_shift']: st.warning(f"Changement détecté : {res['secondary']}")
-                else: st.success("Structure harmonique parfaite.")
+            with c1: st.markdown(f'<div class="metric-container"><div class="label-custom">DOMINANTE</div><div class="value-custom">{res["vote"]}</div><div>{get_camelot_pro(res["vote"])}</div></div>', unsafe_allow_html=True)
+            with c2: st.markdown(f'<div class="metric-container" style="border-bottom: 4px solid #6366F1;"><div class="label-custom">SYNTHÈSE</div><div class="value-custom">{res["synthese"]}</div><div>{cam_final}</div></div>', unsafe_allow_html=True)
+            with c3: st.markdown(f'<div class="metric-container"><div class="label-custom">PURETÉ</div><div class="value-custom">{res["purity"]}%</div></div>', unsafe_allow_html=True)
+            with c4: st.markdown(f'<div class="metric-container"><div class="label-custom">BPM</div><div class="value-custom">{res["tempo"]}</div></div>', unsafe_allow_html=True)
             
-            st.plotly_chart(px.scatter(df_tl, x="Temps", y="Note", color="Confiance", size="Confiance", template="plotly_white"), use_container_width=True)
+            st.plotly_chart(px.scatter(pd.DataFrame(res['timeline']), x="Temps", y="Note", color="Confiance", template="plotly_white"), use_container_width=True)
 
 with tabs[1]:
     if st.session_state.history:
-        st.subheader(f"Historique complet ({len(st.session_state.history)} fichiers)")
-        df_hist = pd.DataFrame(st.session_state.history)
-        st.dataframe(df_hist, use_container_width=True)
-        st.download_button("📥 TÉLÉCHARGER CSV", df_hist.to_csv(index=False).encode('utf-8'), "historique_ricardo.csv", "text/csv")
+        st.dataframe(pd.DataFrame(st.session_state.history), use_container_width=True)
     else: st.info("Historique vide.")
