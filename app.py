@@ -26,9 +26,7 @@ st.set_page_config(page_title="Ricardo_DJ228 | KEY 98% FIABLE", page_icon="🎧"
 TELEGRAM_TOKEN = "7751365982:AAFLbeRoPsDx5OyIOlsgHcGKpI12hopzCYo"
 CHAT_ID = "-1003602454394" 
 
-# Initialisation des états (AJOUT DE LA CLÉ ICI POUR ÉVITER L'ERREUR)
-if 'uploader_key' not in st.session_state:
-    st.session_state.uploader_key = "0"
+# Initialisation des états
 if 'history' not in st.session_state:
     st.session_state.history = []
 if 'processed_files' not in st.session_state:
@@ -201,17 +199,17 @@ with st.sidebar:
     st.info("Conseillé après 50 analyses pour libérer la RAM.")
 
 # --- ZONE D'IMPORTATION ---
-files = st.file_uploader("📂 DÉPOSEZ VOS TRACKS ICI", type=['mp3', 'wav', 'flac'], accept_multiple_files=True, key=st.session_state.uploader_key)
+# Utilisation d'une clé fixe mais réinitialisation manuelle
+files = st.file_uploader("📂 DÉPOSEZ VOS TRACKS ICI", type=['mp3', 'wav', 'flac'], accept_multiple_files=True, key="my_uploader")
 
 tabs = st.tabs(["📁 ANALYSEUR", "🕒 HISTORIQUE"])
 
 with tabs[0]:
     if files:
-        has_new_files = False
+        newly_processed = False
         for f in files:
             file_id = f"{f.name}_{f.size}"
             if file_id not in st.session_state.processed_files:
-                has_new_files = True
                 with st.spinner(f"Traitement : {f.name}"):
                     f_bytes = f.read()
                     res = get_full_analysis(f_bytes, f.name)
@@ -246,10 +244,10 @@ with tabs[0]:
                         st.session_state.order_list.insert(0, file_id)
                     del f_bytes
                     gc.collect()
+                    newly_processed = True
 
-        # --- ACTION DE VIDAGE DU DRAG & DROP (VERSION SÉCURISÉE) ---
-        if has_new_files:
-            st.session_state.uploader_key = str(datetime.now())
+        # Cette partie vide la liste "Drag files" sans casser le moteur de Streamlit
+        if newly_processed:
             st.rerun()
 
     # AFFICHAGE LIMITÉ AUX 10 DERNIERS POUR LA FLUIDITÉ
