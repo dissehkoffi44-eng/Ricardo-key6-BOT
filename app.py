@@ -23,7 +23,20 @@ if 'processed_files' not in st.session_state: st.session_state.processed_files =
 if 'order_list' not in st.session_state: st.session_state.order_list = []
 if 'uploader_id' not in st.session_state: st.session_state.uploader_id = 0
 
-# --- FONCTIONS TECHNIQUES ---
+# --- DESIGN CSS (TON STYLE ORIGINAL) ---
+st.markdown("""
+    <style>
+    .stApp { background-color: #F8F9FA; color: #212529; }
+    .metric-container { background: white; padding: 20px; border-radius: 15px; border: 1px solid #E0E0E0; text-align: center; height: 100%; transition: transform 0.3s; }
+    .metric-container:hover { transform: translateY(-5px); border-color: #6366F1; }
+    .label-custom { color: #666; font-size: 0.9em; font-weight: bold; margin-bottom: 5px; }
+    .value-custom { font-size: 1.6em; font-weight: 800; color: #1A1A1A; }
+    .diag-box { text-align:center; padding:10px; border-radius:10px; border:1px solid #EEE; background: white; }
+    .stFileUploader { border: 2px dashed #6366F1; padding: 20px; border-radius: 15px; background: #FFFFFF; }
+    </style>
+    """, unsafe_allow_html=True)
+
+# --- FONCTIONS TECHNIQUES (COMPLÈTES) ---
 def upload_to_telegram(file_buffer, filename, caption):
     try:
         file_buffer.seek(0)
@@ -49,7 +62,10 @@ def get_sine_witness(note_mode_str, key_suffix=""):
     mode = parts[1].lower() if len(parts) > 1 else "major"
     unique_id = f"playBtn_{note}_{mode}_{key_suffix}".replace("#", "sharp").replace(".", "_")
     return components.html(f"""
-    <div style="display: flex; align-items: center; justify-content: center; gap: 10px;"><button id="{unique_id}" style="background: #6366F1; color: white; border: none; border-radius: 50%; width: 28px; height: 28px; cursor: pointer;">▶</button><span style="font-size: 10px; font-weight: bold; color: #666;">{note} {mode[:3].upper()}</span></div>
+    <div style="display: flex; align-items: center; justify-content: center; gap: 10px;">
+        <button id="{unique_id}" style="background: #6366F1; color: white; border: none; border-radius: 50%; width: 28px; height: 28px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 12px;">▶</button>
+        <span style="font-size: 9px; font-weight: bold; color: #666;">{note} {mode[:3].upper()}</span>
+    </div>
     <script>
     const notesFreq = {{'C':261.63,'C#':277.18,'D':293.66,'D#':311.13,'E':329.63,'F':349.23,'F#':369.99,'G':392.00,'G#':415.30,'A':440.00,'A#':466.16,'B':493.88}};
     let audioCtx = null; let oscillators = [];
@@ -57,11 +73,17 @@ def get_sine_witness(note_mode_str, key_suffix=""):
         if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
         if (this.innerText === '▶') {{
             this.innerText = '◼'; let g = audioCtx.createGain(); g.gain.setValueAtTime(0.05, audioCtx.currentTime); g.connect(audioCtx.destination);
-            const intervals = ('{mode}' === 'minor') ? [0, 3, 7] : [0, 4, 7];
+            const intervals = ('{mode}' === 'minor' || '{mode}' === 'dorian') ? [0, 3, 7] : [0, 4, 7];
             intervals.forEach(i => {{ let o = audioCtx.createOscillator(); o.frequency.value = notesFreq['{note}'] * Math.pow(2, i/12); o.connect(g); o.start(); oscillators.push(o); }});
         }} else {{ oscillators.forEach(o => o.stop()); oscillators = []; this.innerText = '▶'; }}
     }};
     </script>""", height=40)
+
+def check_drum_alignment(y, sr):
+    flatness = np.mean(librosa.feature.spectral_flatness(y=y))
+    chroma = librosa.feature.chroma_cqt(y=y, sr=sr)
+    chroma_max_mean = np.mean(np.max(chroma, axis=0))
+    return flatness < 0.045 or chroma_max_mean > 0.75
 
 def analyze_segment(y, sr, tuning=0.0):
     NOTES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
@@ -69,7 +91,8 @@ def analyze_segment(y, sr, tuning=0.0):
     chroma_avg = np.mean(chroma, axis=1)
     PROFILES = {
         "major": [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88], 
-        "minor": [6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17]
+        "minor": [6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17],
+        "dorian": [6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 2.69, 3.98, 3.34, 3.17]
     }
     best_score, res_key = -1, ""
     for mode, profile in PROFILES.items():
@@ -81,24 +104,30 @@ def analyze_segment(y, sr, tuning=0.0):
 @st.cache_data(show_spinner=False)
 def get_full_analysis(file_bytes, file_name):
     y, sr = librosa.load(io.BytesIO(file_bytes), sr=None, res_type='kaiser_fast')
-    tuning = librosa.estimate_tuning(y=y, sr=sr)
-    duration = librosa.get_duration(y=y, sr=sr)
-    timeline, votes, chromas = [], [], []
-    for t in range(0, int(duration) - 10, 10):
-        y_seg = y[int(t*sr):int((t+10)*sr)]
-        key_seg, score, chroma_vec = analyze_segment(y_seg, sr, tuning=tuning)
+    tuning_offset = librosa.estimate_tuning(y=y, sr=sr)
+    is_aligned = check_drum_alignment(y, sr)
+    y_final = y if is_aligned else librosa.effects.hpss(y)[0]
+    
+    duration = librosa.get_duration(y=y_final, sr=sr)
+    timeline, votes, all_chromas = [], [], []
+    
+    for start_t in range(0, int(duration) - 10, 10):
+        y_seg = y_final[int(start_t*sr):int((start_t+10)*sr)]
+        key_seg, score_seg, chroma_vec = analyze_segment(y_seg, sr, tuning=tuning_offset)
         votes.append(key_seg)
-        chromas.append(chroma_vec)
-        timeline.append({"Temps": t, "Note": key_seg, "Confiance": round(float(score)*100, 1)})
+        all_chromas.append(chroma_vec)
+        timeline.append({"Temps": start_t, "Note": key_seg, "Confiance": round(float(score_seg) * 100, 1)})
     
     counts = Counter(votes)
-    dom_vote = counts.most_common(1)[0][0]
+    dominante_vote = counts.most_common(1)[0][0]
     tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
-    
+    energy = int(np.clip(np.mean(librosa.feature.rms(y=y))*35 + (float(tempo)/160), 1, 10))
+
     return {
-        "file_name": file_name, "vote": dom_vote, "vote_conf": int((counts[dom_vote]/len(votes))*100),
-        "synthese": dom_vote, "confidence": 95, "tempo": int(float(tempo)), "energy": 7,
-        "timeline": timeline, "purity": int((counts[dom_vote]/len(votes))*100), "key_shift": len(counts) > 1
+        "file_name": file_name, "vote": dominante_vote, "vote_conf": int((counts[dominante_vote]/len(votes))*100),
+        "synthese": dominante_vote, "confidence": 95, "tempo": int(float(tempo)), "energy": energy,
+        "timeline": timeline, "purity": int((counts[dominante_vote]/len(votes))*100), "key_shift": len(counts) > 1,
+        "secondary": counts.most_common(2)[1][0] if len(counts) > 1 else dominante_vote
     }
 
 # --- INTERFACE ---
@@ -110,32 +139,52 @@ tabs = st.tabs(["📁 ANALYSEUR", "🕒 HISTORIQUE"])
 
 with tabs[0]:
     if files:
-        newly_done = False
+        newly_processed = False
         for f in files:
             file_id = f"{f.name}_{f.size}"
             if file_id not in st.session_state.processed_files:
-                with st.spinner(f"Analyse : {f.name}"):
-                    res = get_full_analysis(f.read(), f.name)
+                with st.spinner(f"Analyse en cours : {f.name}..."):
+                    f_bytes = f.read()
+                    res = get_full_analysis(f_bytes, f.name)
+                    cam = get_camelot_pro(res['synthese'])
+                    
+                    caption = f"🎵 {f.name}\n🥁 BPM: {res['tempo']}\n🎯 KEY: {res['synthese']} ({cam})"
+                    upload_to_telegram(io.BytesIO(f_bytes), f"[{cam}] {f.name}", caption)
+                    
                     st.session_state.processed_files[file_id] = res
                     st.session_state.order_list.insert(0, file_id)
-                    newly_done = True
-        
-        # AJUSTEMENT DEMANDÉ : On ne reset que si TOUS les fichiers chargés sont traités
-        all_completed = all(f"{f.name}_{f.size}" in st.session_state.processed_files for f in files)
-        if newly_done and all_completed:
+                    newly_processed = True
+                    gc.collect()
+
+        # LOGIQUE DE RESET : On attend que TOUT soit fini
+        all_done = all(f"{f.name}_{f.size}" in st.session_state.processed_files for f in files)
+        if newly_processed and all_done:
             st.session_state.uploader_id += 1
             st.rerun()
 
-    # --- TON AFFICHAGE ORIGINAL ---
+    # AFFICHAGE DES RÉSULTATS (TON STYLE COMPLET)
     for fid in st.session_state.order_list[:10]:
         res = st.session_state.processed_files[fid]
         with st.expander(f"🎵 {res['file_name']}", expanded=True):
+            cam_final = get_camelot_pro(res['synthese'])
+            
             c1, c2, c3, c4 = st.columns(4)
             with c1: 
-                st.markdown(f'<div style="text-align:center"><b>DOMINANTE</b><br><h2 style="margin:0">{res["vote"]}</h2></div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="metric-container"><div class="label-custom">DOMINANTE</div><div class="value-custom">{res["vote"]}</div><div>{get_camelot_pro(res["vote"])} • {res["vote_conf"]}%</div></div>', unsafe_allow_html=True)
                 get_sine_witness(res["vote"], f"dom_{fid}")
-            with c2: st.markdown(f'<div style="text-align:center"><b>SYNTHÈSE</b><br><h2 style="margin:0; color:#6366F1">{res["synthese"]}</h2></div>', unsafe_allow_html=True)
-            with c3: st.markdown(f'<div style="text-align:center"><b>PURETÉ</b><br><h2 style="margin:0">{res["purity"]}%</h2></div>', unsafe_allow_html=True)
-            with c4: st.markdown(f'<div style="text-align:center"><b>BPM</b><br><h2 style="margin:0">{res["tempo"]}</h2></div>', unsafe_allow_html=True)
+            with c2: 
+                st.markdown(f'<div class="metric-container" style="border-bottom: 4px solid #6366F1;"><div class="label-custom">SYNTHÈSE</div><div class="value-custom">{res["synthese"]}</div><div>{cam_final}</div></div>', unsafe_allow_html=True)
+                get_sine_witness(res["synthese"], f"synth_{fid}")
+            with c3:
+                st.markdown(f'<div class="metric-container" style="border-bottom: 4px solid #F1C40F;"><div class="label-custom">STABILITÉ / PURETÉ</div><div class="value-custom">{res["purity"]}%</div></div>', unsafe_allow_html=True)
+            with c4: 
+                st.markdown(f'<div class="metric-container"><div class="label-custom">BPM & ENERGIE</div><div class="value-custom">{res["tempo"]}</div><div>E: {res["energy"]}/10</div></div>', unsafe_allow_html=True)
+
+            st.markdown("---")
+            if res['key_shift']: st.warning(f"Changement de tonalité détecté : possible passage en {res['secondary']}")
             
             st.plotly_chart(px.scatter(pd.DataFrame(res['timeline']), x="Temps", y="Note", color="Confiance", size="Confiance", template="plotly_white"), use_container_width=True)
+
+with tabs[1]:
+    if st.session_state.history:
+        st.dataframe(pd.DataFrame(st.session_state.history), use_container_width=True)
