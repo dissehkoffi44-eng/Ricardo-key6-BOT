@@ -20,7 +20,7 @@ except ImportError:
     MUTAGEN_AVAILABLE = False
 
 # --- CONFIGURATION ---
-st.set_page_config(page_title="Ricardo_DJ228 | V6.2 ", page_icon="🎧", layout="wide")
+st.set_page_config(page_title="Ricardo_DJ228 | V6.1 Pro Digital", page_icon="🎧", layout="wide")
 
 # Paramètres Telegram
 TELEGRAM_TOKEN = "7751365982:AAFLbeRoPsDx5OyIOlsgHcGKpI12hopzCYo"
@@ -170,27 +170,28 @@ def get_full_analysis(file_bytes, file_name):
     tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
     energy = int(np.clip(np.mean(librosa.feature.rms(y=y))*35 + (float(tempo)/160), 1, 10))
 
-    # Préparation données stabilité pour Telegram
-    df_tl = pd.DataFrame(timeline_data)
-    df_s = df_tl.sort_values(by="Confiance", ascending=False).reset_index()
-    n1 = df_s.loc[0, 'Note'] if not df_s.empty else "??"
-    n2 = n1
-    if not df_s.empty:
-        for idx, row in df_s.iterrows():
-            if row['Note'] != n1:
-                n2 = row['Note']
-                break
-
     return {
         "file_name": file_name,
         "vote": dominante_vote, "synthese": tonique_synth, "confidence": int(best_synth_score*100), "tempo": int(float(tempo)), 
         "energy": energy, "timeline": timeline_data, "purity": purity, 
         "key_shift": key_shift_detected, "secondary": top_votes[1][0] if len(top_votes)>1 else top_votes[0][0],
-        "is_filtered": filter_applied, "n1": n1, "n2": n2
+        "is_filtered": filter_applied
     }
 
 # --- INTERFACE ---
-st.markdown("<h1 style='text-align: center;'>🎧 RICARDO_DJ228 | V6.2</h1>", unsafe_allow_html=True)
+st.markdown("<h1 style='text-align: center;'>🎧 RICARDO_DJ228 | V6.1 ULTRA-STABLE</h1>", unsafe_allow_html=True)
+
+# Barre latérale pour maintenance
+with st.sidebar:
+    st.header("⚙️ MAINTENANCE")
+    if st.button("🧹 VIDER TOUT (REDÉMARRAGE)"):
+        st.session_state.history = []
+        st.session_state.processed_files = {}
+        st.session_state.order_list = []
+        st.cache_data.clear()
+        gc.collect()
+        st.rerun()
+    st.info("Conseillé après 50 analyses pour libérer la RAM.")
 
 files = st.file_uploader("📂 DÉPOSEZ VOS TRACKS ICI", type=['mp3', 'wav', 'flac'], accept_multiple_files=True)
 
@@ -206,22 +207,29 @@ with tabs[0]:
                     res = get_full_analysis(f_bytes, f.name)
                     cam_val = get_camelot_pro(res['synthese'])
                     
-                    # --- MESSAGE TELEGRAM MODIFIÉ ---
-                    caption_msg = (
-                        f"🎵 {res['file_name']}\n"
-                        f"DOMINANTE : {res['vote']} ({get_camelot_pro(res['vote'])})\n"
-                        f"SYNTHÈSE : {res['synthese']} ({get_camelot_pro(res['synthese'])})\n"
-                        f"STABILITÉ :\n"
-                        f"- Tonalité confiance 1 : {res['n1']} ({get_camelot_pro(res['n1'])})\n"
-                        f"- Tonalité confiance 2 : {res['n2']} ({get_camelot_pro(res['n2'])})\n"
-                        f"🥁 BPM: {res['tempo']}"
+                    df_tl_tg = pd.DataFrame(res['timeline']).sort_values(by="Confiance", ascending=False).reset_index()
+                    n1_tg = df_tl_tg.loc[0, 'Note'] if not df_tl_tg.empty else "??"
+                    c1_tg = df_tl_tg.loc[0, 'Confiance'] if not df_tl_tg.empty else 0
+                    n2_tg = n1_tg
+                    c2_tg = 0
+                    if not df_tl_tg.empty:
+                        for idx, row in df_tl_tg.iterrows():
+                            if row['Note'] != n1_tg:
+                                n2_tg = row['Note']
+                                c2_tg = row['Confiance']
+                                break
+
+                    tg_caption = (
+                        f"🎵 {f.name}\n"
+                        f"🥁 BPM: {res['tempo']}\n"
+                        f"🎯 DOMINANTE: {res['vote']} ({get_camelot_pro(res['vote'])})\n"
+                        f"🧬 SYNTHÈSE: {res['synthese']} ({cam_val}) - Confiance: {res['confidence']}%\n"
+                        f"⚖️ STABILITÉ:\n"
+                        f"   1️⃣ {n1_tg} ({get_camelot_pro(n1_tg)}) | Confiance: {c1_tg}%\n"
+                        f"   2️⃣ {n2_tg} ({get_camelot_pro(n2_tg)}) | Confiance: {c2_tg}%"
                     )
-                    
-                    success = upload_to_telegram(
-                        io.BytesIO(f_bytes), 
-                        f"[{cam_val}] {f.name}", 
-                        caption_msg
-                    )
+
+                    success = upload_to_telegram(io.BytesIO(f_bytes), f"[{cam_val}] {f.name}", tg_caption)
                     res['saved_on_tg'] = success
                     st.session_state.processed_files[file_id] = res
                     if file_id not in st.session_state.order_list:
@@ -229,7 +237,9 @@ with tabs[0]:
                     del f_bytes
                     gc.collect()
 
-        for fid in st.session_state.order_list:
+        # AFFICHAGE LIMITÉ AUX 10 DERNIERS POUR LA FLUIDITÉ
+        st.subheader("Les 10 dernières analyses")
+        for fid in st.session_state.order_list[:10]:
             res = st.session_state.processed_files[fid]
             file_name = res['file_name']
             with st.expander(f"🎵 {file_name}", expanded=True):
@@ -246,23 +256,31 @@ with tabs[0]:
                     get_sine_witness(res["synthese"], f"synth_{fid}")
                     if res.get('saved_on_tg'): st.caption("✅ Backup envoyé sur Telegram")
                 with c3:
-                    st.markdown(f'<div class="metric-container" style="border-bottom: 4px solid #F1C40F;"><div class="label-custom">STABILITÉ</div><div style="font-size:0.85em; margin-top:5px;">🥇 {res["n1"]} <b>({get_camelot_pro(res["n1"])})</b></div><div style="font-size:0.85em;">🥈 {res["n2"]} <b>({get_camelot_pro(res["n2"])})</b></div></div>', unsafe_allow_html=True)
+                    df_tl = pd.DataFrame(res['timeline'])
+                    df_s = df_tl.sort_values(by="Confiance", ascending=False).reset_index()
+                    n1 = df_s.loc[0, 'Note'] if not df_s.empty else "??"
+                    n2 = n1
+                    if not df_s.empty:
+                        for idx, row in df_s.iterrows():
+                            if row['Note'] != n1:
+                                n2 = row['Note']
+                                break
+                    st.markdown(f'<div class="metric-container" style="border-bottom: 4px solid #F1C40F;"><div class="label-custom">STABILITÉ</div><div style="font-size:0.85em; margin-top:5px;">🥇 {n1} <b>({get_camelot_pro(n1)})</b></div><div style="font-size:0.85em;">🥈 {n2} <b>({get_camelot_pro(n2)})</b></div></div>', unsafe_allow_html=True)
                 with c4: 
                     st.markdown(f'<div class="metric-container"><div class="label-custom">BPM & ENERGIE</div><div class="value-custom">{res["tempo"]}</div><div>E: {res["energy"]}/10</div></div>', unsafe_allow_html=True)
 
                 st.markdown("---")
-                # --- CASE CERVEAU SUPPRIMÉE ICI ---
-                d1, d3 = st.columns([1, 3]) 
+                d1, d3 = st.columns([1, 2])
                 with d1: st.markdown(f"<div class='diag-box'><div class='label-custom'>PURETÉ</div><div style='color:{'#2ECC71' if res['purity'] > 75 else '#F1C40F'}; font-weight:bold;'>{res['purity']}%</div></div>", unsafe_allow_html=True)
                 with d3:
                     if res['key_shift']: st.warning(f"Changement détecté : {res['secondary']}")
                     else: st.success("Structure harmonique parfaite.")
                 
-                df_tl = pd.DataFrame(res['timeline'])
                 st.plotly_chart(px.scatter(df_tl, x="Temps", y="Note", color="Confiance", size="Confiance", template="plotly_white"), use_container_width=True)
 
 with tabs[1]:
     if st.session_state.history:
+        st.subheader(f"Historique complet ({len(st.session_state.history)} fichiers)")
         df_hist = pd.DataFrame(st.session_state.history)
         st.dataframe(df_hist, use_container_width=True)
         st.download_button("📥 TÉLÉCHARGER CSV", df_hist.to_csv(index=False).encode('utf-8'), "historique_ricardo.csv", "text/csv")
