@@ -26,14 +26,14 @@ st.set_page_config(page_title="Ricardo_DJ228 | KEY 98% FIABLE", page_icon="🎧"
 TELEGRAM_TOKEN = "7751365982:AAFLbeRoPsDx5OyIOlsgHcGKpI12hopzCYo"
 CHAT_ID = "-1003602454394" 
 
-# --- INITIALISATION DES ÉTATS ---
+# Initialisation des états
 if 'history' not in st.session_state:
     st.session_state.history = []
 if 'processed_files' not in st.session_state:
     st.session_state.processed_files = {}
 if 'order_list' not in st.session_state:
     st.session_state.order_list = []
-# On initialise la clé de l'uploader si elle n'existe pas
+# Initialisation de l'ID pour le reset de la zone drag & drop
 if 'uploader_id' not in st.session_state:
     st.session_state.uploader_id = 0
 
@@ -197,18 +197,18 @@ with st.sidebar:
         gc.collect()
         st.rerun()
 
-# --- ZONE D'IMPORTATION ---
-# Utilisation de la clé dynamique pour réinitialiser l'uploader
+# --- ZONE D'IMPORTATION (RESET SÉCURISÉ) ---
 files = st.file_uploader("📂 DÉPOSEZ VOS TRACKS ICI", type=['mp3', 'wav', 'flac'], accept_multiple_files=True, key=f"uploader_{st.session_state.uploader_id}")
 
 tabs = st.tabs(["📁 ANALYSEUR", "🕒 HISTORIQUE"])
 
 with tabs[0]:
     if files:
-        processed_something = False
+        processed_count = 0
         for f in files:
             file_id = f"{f.name}_{f.size}"
             if file_id not in st.session_state.processed_files:
+                processed_count += 1
                 with st.spinner(f"Traitement : {f.name}"):
                     f_bytes = f.read()
                     res = get_full_analysis(f_bytes, f.name)
@@ -226,22 +226,30 @@ with tabs[0]:
                                 c2_tg = row['Confiance']
                                 break
 
-                    tg_caption = (f"🎵 {f.name}\n🥁 BPM: {res['tempo']}\n🎯 DOMINANTE: {res['vote']} ({get_camelot_pro(res['vote'])}) - {res['vote_conf']}%\n🧬 SYNTHÈSE: {res['synthese']} ({cam_val}) - {res['confidence']}%")
+                    tg_caption = (
+                        f"🎵 {f.name}\n"
+                        f"🥁 BPM: {res['tempo']}\n"
+                        f"🎯 DOMINANTE: {res['vote']} ({get_camelot_pro(res['vote'])}) - {res['vote_conf']}%\n"
+                        f"🧬 SYNTHÈSE: {res['synthese']} ({cam_val}) - {res['confidence']}%\n"
+                        f"⚖️ STABILITÉ:\n"
+                        f"   1️⃣ {n1_tg} ({get_camelot_pro(n1_tg)}) | {c1_tg}%\n"
+                        f"   2️⃣ {n2_tg} ({get_camelot_pro(n2_tg)}) | {c2_tg}%"
+                    )
 
-                    upload_to_telegram(io.BytesIO(f_bytes), f"[{cam_val}] {f.name}", tg_caption)
+                    success = upload_to_telegram(io.BytesIO(f_bytes), f"[{cam_val}] {f.name}", tg_caption)
+                    res['saved_on_tg'] = success
                     st.session_state.processed_files[file_id] = res
                     if file_id not in st.session_state.order_list:
                         st.session_state.order_list.insert(0, file_id)
-                    processed_something = True
                     gc.collect()
         
-        # --- RÉINITIALISATION DE LA ZONE DE DÉPÔT ---
-        if processed_something:
-            st.session_state.uploader_id += 1 # On change l'ID pour forcer Streamlit à créer un nouvel uploader vide
+        # Reset après traitement pour vider la zone
+        if processed_count > 0:
+            st.session_state.uploader_id += 1
             st.rerun()
 
-    # AFFICHAGE
-    st.subheader("Analyses récentes")
+    # --- AFFICHAGE EXACTEMENT COMME L'ORIGINAL ---
+    st.subheader("Les 10 dernières analyses")
     for fid in st.session_state.order_list[:10]:
         res = st.session_state.processed_files[fid]
         file_name = res['file_name']
@@ -251,14 +259,43 @@ with tabs[0]:
                 st.session_state.history.insert(0, {"Date": datetime.now().strftime("%d/%m %H:%M"), "Fichier": file_name, "Note": res['synthese'], "Camelot": cam_final, "BPM": res['tempo']})
 
             c1, c2, c3, c4 = st.columns(4)
-            with c1: st.markdown(f'<div class="metric-container"><div class="label-custom">DOMINANTE</div><div class="value-custom">{res["vote"]}</div><div>{get_camelot_pro(res["vote"])}</div></div>', unsafe_allow_html=True)
-            with c2: st.markdown(f'<div class="metric-container" style="border-bottom: 4px solid #6366F1;"><div class="label-custom">SYNTHÈSE</div><div class="value-custom">{res["synthese"]}</div><div>{cam_final}</div></div>', unsafe_allow_html=True)
-            with c3: st.markdown(f'<div class="metric-container"><div class="label-custom">PURETÉ</div><div class="value-custom">{res["purity"]}%</div></div>', unsafe_allow_html=True)
-            with c4: st.markdown(f'<div class="metric-container"><div class="label-custom">BPM</div><div class="value-custom">{res["tempo"]}</div></div>', unsafe_allow_html=True)
+            with c1: 
+                st.markdown(f'<div class="metric-container"><div class="label-custom">DOMINANTE</div><div class="value-custom">{res["vote"]}</div><div>{get_camelot_pro(res["vote"])} • {res["vote_conf"]}%</div></div>', unsafe_allow_html=True)
+                get_sine_witness(res["vote"], f"dom_{fid}")
+            with c2: 
+                st.markdown(f'<div class="metric-container" style="border-bottom: 4px solid #6366F1;"><div class="label-custom">SYNTHÈSE</div><div class="value-custom">{res["synthese"]}</div><div>{cam_final} • {res["confidence"]}%</div></div>', unsafe_allow_html=True)
+                get_sine_witness(res["synthese"], f"synth_{fid}")
+                if res.get('saved_on_tg'): st.caption("✅ Backup envoyé sur Telegram")
+            with c3:
+                df_tl = pd.DataFrame(res['timeline'])
+                df_s = df_tl.sort_values(by="Confiance", ascending=False).reset_index()
+                n1 = df_s.loc[0, 'Note'] if not df_s.empty else "??"
+                c1_val = df_s.loc[0, 'Confiance'] if not df_s.empty else 0
+                n2 = n1
+                c2_val = 0
+                if not df_s.empty:
+                    for idx, row in df_s.iterrows():
+                        if row['Note'] != n1:
+                            n2 = row['Note']
+                            c2_val = row['Confiance']
+                            break
+                st.markdown(f'<div class="metric-container" style="border-bottom: 4px solid #F1C40F;"><div class="label-custom">STABILITÉ</div><div style="font-size:0.85em; margin-top:5px;">🥇 {n1} ({get_camelot_pro(n1)}) <b>{c1_val}%</b></div><div style="font-size:0.85em;">🥈 {n2} ({get_camelot_pro(n2)}) <b>{c2_val}%</b></div></div>', unsafe_allow_html=True)
+            with c4: 
+                st.markdown(f'<div class="metric-container"><div class="label-custom">BPM & ENERGIE</div><div class="value-custom">{res["tempo"]}</div><div>E: {res["energy"]}/10</div></div>', unsafe_allow_html=True)
+
+            st.markdown("---")
+            d1, d3 = st.columns([1, 2])
+            with d1: st.markdown(f"<div class='diag-box'><div class='label-custom'>PURETÉ</div><div style='color:{'#2ECC71' if res['purity'] > 75 else '#F1C40F'}; font-weight:bold;'>{res['purity']}%</div></div>", unsafe_allow_html=True)
+            with d3:
+                if res['key_shift']: st.warning(f"Changement détecté : {res['secondary']}")
+                else: st.success("Structure harmonique parfaite.")
             
-            st.plotly_chart(px.scatter(pd.DataFrame(res['timeline']), x="Temps", y="Note", color="Confiance", template="plotly_white"), use_container_width=True)
+            st.plotly_chart(px.scatter(df_tl, x="Temps", y="Note", color="Confiance", size="Confiance", template="plotly_white"), use_container_width=True)
 
 with tabs[1]:
     if st.session_state.history:
-        st.dataframe(pd.DataFrame(st.session_state.history), use_container_width=True)
+        st.subheader(f"Historique complet ({len(st.session_state.history)} fichiers)")
+        df_hist = pd.DataFrame(st.session_state.history)
+        st.dataframe(df_hist, use_container_width=True)
+        st.download_button("📥 TÉLÉCHARGER CSV", df_hist.to_csv(index=False).encode('utf-8'), "historique_ricardo.csv", "text/csv")
     else: st.info("Historique vide.")
