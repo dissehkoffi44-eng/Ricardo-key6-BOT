@@ -9,7 +9,7 @@ import io
 import streamlit.components.v1 as components
 from concurrent.futures import ThreadPoolExecutor
 import requests  
-import gc           
+import gc               
 
 # --- CONFIGURATION & CSS ---
 st.set_page_config(page_title="KEY V6% ", page_icon="🎧", layout="wide")
@@ -164,12 +164,34 @@ def get_full_analysis(file_bytes, file_name):
     tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
     energy = int(np.clip(np.mean(librosa.feature.rms(y=y))*35 + (float(tempo)/160), 1, 10))
 
+    # --- CALCULS ADDITIONNELS POUR LE RAPPORT ---
+    df_tl = pd.DataFrame(timeline_data)
+    df_s = df_tl.sort_values(by="Confiance", ascending=False).reset_index()
+    n1 = df_s.loc[0, 'Note'] if not df_s.empty else "??"
+    c1_val = df_s.loc[0, 'Confiance'] if not df_s.empty else 0
+    n2 = n1
+    c2_val = 0
+    if not df_s.empty:
+        for idx, row in df_s.iterrows():
+            if row['Note'] != n1:
+                n2 = row['Note']
+                c2_val = row['Confiance']
+                break
+    
+    candidates = [
+        {"note": dominante_vote, "conf": dominante_conf},
+        {"note": tonique_synth, "conf": int(best_synth_score*100)},
+        {"note": n1, "conf": c1_val}
+    ]
+    recommended = max(candidates, key=lambda x: x['conf'])
+
     return {
         "file_name": file_name,
         "vote": dominante_vote, "vote_conf": dominante_conf, 
         "synthese": tonique_synth, "confidence": int(best_synth_score*100), "tempo": int(float(tempo)), 
         "energy": energy, "timeline": timeline_data, "purity": purity, 
-        "key_shift": key_shift_detected, "secondary": top_votes[1][0] if len(top_votes)>1 else top_votes[0][0]
+        "key_shift": key_shift_detected, "secondary": top_votes[1][0] if len(top_votes)>1 else top_votes[0][0],
+        "n1": n1, "c1": c1_val, "n2": n2, "c2": c2_val, "recommended": recommended
     }
 
 # --- INTERFACE ---
@@ -196,7 +218,18 @@ with tabs[0]:
                 with st.spinner(f"Traitement : {f.name}"):
                     f_bytes = f.read()
                     res = get_full_analysis(f_bytes, f.name)
-                    tg_caption = f"🎵 {f.name}\n🥁 BPM: {res['tempo']}\n🎯 KEY: {res['synthese']}"
+                    
+                    # --- CONSTRUCTION DU CAPTION TELEGRAM ---
+                    tg_caption = (
+                        f"🎵 {res['file_name']}\n"
+                        f"🥁 BPM: {res['tempo']} | E: {res['energy']}/10\n"
+                        f"━━━━━━━━━━━━━━━\n"
+                        f"🔥 RECOMMANDÉ: {res['recommended']['note']} ({get_camelot_pro(res['recommended']['note'])}) - {res['recommended']['conf']}%\n"
+                        f"💎 SYNTHÈSE: {res['synthese']} ({get_camelot_pro(res['synthese'])})\n"
+                        f"📊 DOMINANTE: {res['vote']} ({get_camelot_pro(res['vote'])})\n"
+                        f"⚖️ STABILITÉ: 🥇{res['n1']} / 🥈{res['n2']}"
+                    )
+                    
                     upload_to_telegram(io.BytesIO(f_bytes), f.name, tg_caption)
                     st.session_state.processed_files[file_id] = res
                     st.session_state.order_list.insert(0, file_id)
@@ -205,29 +238,16 @@ with tabs[0]:
             res = st.session_state.processed_files[fid]
             with st.expander(f"🎵 {res['file_name']}", expanded=True):
                 
-                # --- 1. CALCUL RÉSULTAT DÉCISIF ---
-                df_tl = pd.DataFrame(res['timeline'])
-                df_s = df_tl.sort_values(by="Confiance", ascending=False).reset_index()
-                n1 = df_s.loc[0, 'Note'] if not df_s.empty else "??"
-                c1_val = df_s.loc[0, 'Confiance'] if not df_s.empty else 0
-                
-                candidates = [
-                    {"note": res["vote"], "conf": res["vote_conf"]},
-                    {"note": res["synthese"], "conf": res["confidence"]},
-                    {"note": n1, "conf": c1_val}
-                ]
-                best = max(candidates, key=lambda x: x['conf'])
-
-                # --- 2. AFFICHAGE CASE DÉCISIVE ---
+                # --- AFFICHAGE CASE DÉCISIVE ---
                 st.markdown(f"""
                     <div class="final-decision-box">
                         <div style="font-size: 1em; opacity: 0.8; letter-spacing: 1px;">NOTE RÉELLE RECOMMANDÉE</div>
-                        <div style="font-size: 3.8em; font-weight: 900; margin: 5px 0; line-height:1;">{best['note']}</div>
-                        <div style="font-size: 1.6em; font-weight: 700; color: #F1C40F;">{get_camelot_pro(best['note'])} • {best['conf']}% FIABILITÉ</div>
+                        <div style="font-size: 3.8em; font-weight: 900; margin: 5px 0; line-height:1;">{res['recommended']['note']}</div>
+                        <div style="font-size: 1.6em; font-weight: 700; color: #F1C40F;">{get_camelot_pro(res['recommended']['note'])} • {res['recommended']['conf']}% FIABILITÉ</div>
                     </div>
                 """, unsafe_allow_html=True)
 
-                # --- 3. LES 4 COLONNES ---
+                # --- LES 4 COLONNES ---
                 c1, c2, c3, c4 = st.columns(4)
                 with c1:
                     st.markdown(f'<div class="metric-container"><div class="label-custom">DOMINANTE</div><div class="value-custom">{res["vote"]}</div><div>{get_camelot_pro(res["vote"])} • {res["vote_conf"]}%</div></div>', unsafe_allow_html=True)
@@ -236,19 +256,11 @@ with tabs[0]:
                     st.markdown(f'<div class="metric-container" style="border-bottom: 4px solid #6366F1;"><div class="label-custom">SYNTHÈSE</div><div class="value-custom">{res["synthese"]}</div><div>{get_camelot_pro(res["synthese"])} • {res["confidence"]}%</div></div>', unsafe_allow_html=True)
                     get_sine_witness(res["synthese"], f"synth_{fid}")
                 with c3:
-                    # --- RETOUR À LA STABILITÉ ORIGINALE (🥇 & 🥈) ---
-                    n2 = n1
-                    c2_val = 0
-                    if not df_s.empty:
-                        for idx, row in df_s.iterrows():
-                            if row['Note'] != n1:
-                                n2 = row['Note']
-                                c2_val = row['Confiance']
-                                break
-                    st.markdown(f'<div class="metric-container" style="border-bottom: 4px solid #F1C40F;"><div class="label-custom">STABILITÉ</div><div style="font-size:0.85em; margin-top:5px;">🥇 {n1} ({get_camelot_pro(n1)}) <b>{c1_val}%</b></div><div style="font-size:0.85em;">🥈 {n2} ({get_camelot_pro(n2)}) <b>{c2_val}%</b></div></div>', unsafe_allow_html=True)
+                    st.markdown(f'<div class="metric-container" style="border-bottom: 4px solid #F1C40F;"><div class="label-custom">STABILITÉ</div><div style="font-size:0.85em; margin-top:5px;">🥇 {res["n1"]} ({get_camelot_pro(res["n1"])}) <b>{res["c1"]}%</b></div><div style="font-size:0.85em;">🥈 {res["n2"]} ({get_camelot_pro(res["n2"])}) <b>{res["c2"]}%</b></div></div>', unsafe_allow_html=True)
                 with c4:
                     st.markdown(f'<div class="metric-container"><div class="label-custom">BPM & ENERGIE</div><div class="value-custom">{res["tempo"]}</div><div>E: {res["energy"]}/10</div></div>', unsafe_allow_html=True)
 
+                df_tl = pd.DataFrame(res['timeline'])
                 st.plotly_chart(px.scatter(df_tl, x="Temps", y="Note", color="Confiance", size="Confiance", template="plotly_white"), use_container_width=True)
 
 with tabs[1]:
