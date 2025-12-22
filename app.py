@@ -9,7 +9,7 @@ import io
 import streamlit.components.v1 as components
 from concurrent.futures import ThreadPoolExecutor
 import requests  
-import gc         
+import gc           
 
 # --- IMPORT POUR LES TAGS MP3 (MUTAGEN) ---
 try:
@@ -57,6 +57,15 @@ st.markdown("""
     .value-custom { font-size: 1.6em; font-weight: 800; color: #1A1A1A; }
     .diag-box { text-align:center; padding:10px; border-radius:10px; border:1px solid #EEE; background: white; }
     .stFileUploader { border: 2px dashed #6366F1; padding: 20px; border-radius: 15px; background: #FFFFFF; }
+    .final-decision-box { 
+        background: linear-gradient(135deg, #6366F1 0%, #4F46E5 100%); 
+        color: white; 
+        padding: 25px; 
+        border-radius: 15px; 
+        text-align: center; 
+        margin-bottom: 20px;
+        box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -251,6 +260,28 @@ with tabs[0]:
                 cam_final = get_camelot_pro(res['synthese'])
                 if not any(h['Fichier'] == file_name for h in st.session_state.history): 
                     st.session_state.history.insert(0, {"Date": datetime.now().strftime("%d/%m %H:%M"), "Fichier": file_name, "Note": res['synthese'], "Camelot": cam_final, "BPM": res['tempo']})
+
+                # --- NOUVELLE CASE SYNTHÈSE DÉCISIVE ---
+                df_tl_final = pd.DataFrame(res['timeline']).sort_values(by="Confiance", ascending=False).reset_index()
+                n1_final = df_tl_final.loc[0, 'Note'] if not df_tl_final.empty else "??"
+                c1_final = df_tl_final.loc[0, 'Confiance'] if not df_tl_final.empty else 0
+                
+                # Comparaison pour trouver la meilleure note réelle
+                candidates = [
+                    {"note": res["vote"], "conf": res["vote_conf"]},
+                    {"note": res["synthese"], "conf": res["confidence"]},
+                    {"note": n1_final, "conf": c1_final}
+                ]
+                best_candidate = max(candidates, key=lambda x: x['conf'])
+                
+                st.markdown(f"""
+                    <div class="final-decision-box">
+                        <div style="font-size: 1.1em; font-weight: 300; opacity: 0.9;">NOTE RÉELLE RECOMMANDÉE</div>
+                        <div style="font-size: 3.5em; font-weight: 900; margin: 10px 0;">{best_candidate['note']}</div>
+                        <div style="font-size: 1.5em; font-weight: 700;">{get_camelot_pro(best_candidate['note'])} • {best_candidate['conf']}% DE FIABILITÉ</div>
+                    </div>
+                """, unsafe_allow_html=True)
+                # ----------------------------------------
 
                 c1, c2, c3, c4 = st.columns(4)
                 with c1: 
