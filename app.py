@@ -178,9 +178,10 @@ def get_full_analysis(file_bytes, file_name):
                 c2_val = row['Confiance']
                 break
     
+    synth_conf = int(best_synth_score*100)
     candidates = [
         {"note": dominante_vote, "conf": dominante_conf},
-        {"note": tonique_synth, "conf": int(best_synth_score*100)},
+        {"note": tonique_synth, "conf": synth_conf},
         {"note": n1, "conf": c1_val}
     ]
     recommended = max(candidates, key=lambda x: x['conf'])
@@ -188,7 +189,7 @@ def get_full_analysis(file_bytes, file_name):
     return {
         "file_name": file_name,
         "vote": dominante_vote, "vote_conf": dominante_conf, 
-        "synthese": tonique_synth, "confidence": int(best_synth_score*100), "tempo": int(float(tempo)), 
+        "synthese": tonique_synth, "confidence": synth_conf, "tempo": int(float(tempo)), 
         "energy": energy, "timeline": timeline_data, "purity": purity, 
         "key_shift": key_shift_detected, "secondary": top_votes[1][0] if len(top_votes)>1 else top_votes[0][0],
         "n1": n1, "c1": c1_val, "n2": n2, "c2": c2_val, "recommended": recommended
@@ -219,15 +220,17 @@ with tabs[0]:
                     f_bytes = f.read()
                     res = get_full_analysis(f_bytes, f.name)
                     
-                    # --- CONSTRUCTION DU CAPTION TELEGRAM ---
+                    # --- CONSTRUCTION DU CAPTION TELEGRAM AVEC POURCENTAGES ---
                     tg_caption = (
                         f"🎵 {res['file_name']}\n"
                         f"🥁 BPM: {res['tempo']} | E: {res['energy']}/10\n"
                         f"━━━━━━━━━━━━━━━\n"
-                        f"🔥 RECOMMANDÉ: {res['recommended']['note']} ({get_camelot_pro(res['recommended']['note'])}) - {res['recommended']['conf']}%\n"
-                        f"💎 SYNTHÈSE: {res['synthese']} ({get_camelot_pro(res['synthese'])})\n"
-                        f"📊 DOMINANTE: {res['vote']} ({get_camelot_pro(res['vote'])})\n"
-                        f"⚖️ STABILITÉ: 🥇{res['n1']} / 🥈{res['n2']}"
+                        f"🔥 RECOMMANDÉ: {res['recommended']['note']} ({get_camelot_pro(res['recommended']['note'])}) • {res['recommended']['conf']}%\n"
+                        f"💎 SYNTHÈSE: {res['synthese']} ({get_camelot_pro(res['synthese'])}) • {res['confidence']}%\n"
+                        f"📊 DOMINANTE: {res['vote']} ({get_camelot_pro(res['vote'])}) • {res['vote_conf']}%\n"
+                        f"⚖️ STABILITÉ:\n"
+                        f"🥇 {res['n1']} ({get_camelot_pro(res['n1'])}) • {res['c1']}%\n"
+                        f"🥈 {res['n2']} ({get_camelot_pro(res['n2'])}) • {res['c2']}%"
                     )
                     
                     upload_to_telegram(io.BytesIO(f_bytes), f.name, tg_caption)
