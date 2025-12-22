@@ -12,7 +12,7 @@ import requests
 import gc           
 
 # --- CONFIGURATION & CSS ---
-st.set_page_config(page_title="Ricardo_DJ228 | KEY 98% FIABLE", page_icon="🎧", layout="wide")
+st.set_page_config(page_title="KEY V6% ", page_icon="🎧", layout="wide")
 
 st.markdown("""
     <style>
@@ -173,7 +173,7 @@ def get_full_analysis(file_bytes, file_name):
     }
 
 # --- INTERFACE ---
-st.markdown("<h1 style='text-align: center;'>🎧 RICARDO_DJ228 | KEY 98% FIABLE</h1>", unsafe_allow_html=True)
+st.markdown("<h1 style='text-align: center;'>🎧 KEY V6</h1>", unsafe_allow_html=True)
 
 with st.sidebar:
     st.header("⚙️ MAINTENANCE")
