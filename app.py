@@ -9,7 +9,7 @@ import io
 import streamlit.components.v1 as components
 from concurrent.futures import ThreadPoolExecutor
 import requests  
-import gc               
+import gc                
 
 # --- CONFIGURATION & CSS ---
 st.set_page_config(page_title="KEY V6% ", page_icon="🎧", layout="wide")
@@ -62,31 +62,48 @@ def get_sine_witness(note_mode_str, key_suffix=""):
     mode = parts[1].lower() if len(parts) > 1 else "major"
     unique_id = f"playBtn_{note}_{mode}_{key_suffix}".replace("#", "sharp").replace(".", "_")
     
+    # 
     return components.html(f"""
     <div style="display: flex; align-items: center; justify-content: center; gap: 10px; font-family: sans-serif;">
         <button id="{unique_id}" style="background: #6366F1; color: white; border: none; border-radius: 50%; width: 28px; height: 28px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 12px;">▶</button>
-        <span style="font-size: 9px; font-weight: bold; color: #666;">{note} {mode[:3].upper()}</span>
+        <span style="font-size: 9px; font-weight: bold; color: #666;">{note} {mode[:3].upper()} CHORD</span>
     </div>
     <script>
     const notesFreq = {{'C':261.63,'C#':277.18,'D':293.66,'D#':311.13,'E':329.63,'F':349.23,'F#':369.99,'G':392.00,'G#':415.30,'A':440.00,'A#':466.16,'B':493.88}};
-    const semitones = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
     let audioCtx = null; let oscillators = []; let gainNode = null;
+    
     document.getElementById('{unique_id}').onclick = function() {{
         if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        
         if (this.innerText === '▶') {{
             this.innerText = '◼'; this.style.background = '#E74C3C';
-            gainNode = audioCtx.createGain(); gainNode.gain.setValueAtTime(0.05, audioCtx.currentTime);
+            
+            gainNode = audioCtx.createGain();
+            gainNode.gain.setValueAtTime(0, audioCtx.currentTime);
+            gainNode.gain.linearRampToValueAtTime(0.1, audioCtx.currentTime + 0.1); // Fade in pour éviter le clic
             gainNode.connect(audioCtx.destination);
-            const intervals = ('{mode}' === 'minor' || '{mode}' === 'dorian') ? [0, 3, 7] : [0, 4, 7];
+            
+            // Définition de l'accord : Fondamentale, Tierce (Maj/Min), Quinte
+            const isMinor = '{mode}' === 'minor' || '{mode}' === 'dorian';
+            const intervals = isMinor ? [0, 3, 7] : [0, 4, 7];
+            
             intervals.forEach(interval => {{
-                let osc = audioCtx.createOscillator(); osc.type = 'sine';
+                let osc = audioCtx.createOscillator();
+                osc.type = 'triangle'; // Son un peu plus riche que 'sine' pour un accord
                 let freq = notesFreq['{note}'] * Math.pow(2, interval / 12);
-                if (!freq) freq = 440; 
                 osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
-                osc.connect(gainNode); osc.start(); oscillators.push(osc);
+                osc.connect(gainNode);
+                osc.start();
+                oscillators.push(osc);
             }});
         }} else {{
-            oscillators.forEach(o => o.stop()); oscillators = [];
+            if(gainNode) {{
+                gainNode.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 0.1); // Fade out
+                setTimeout(() => {{
+                    oscillators.forEach(o => o.stop());
+                    oscillators = [];
+                }}, 100);
+            }}
             this.innerText = '▶'; this.style.background = '#6366F1';
         }}
     }};
@@ -260,6 +277,10 @@ with tabs[0]:
                     get_sine_witness(res["synthese"], f"synth_{fid}")
                 with c3:
                     st.markdown(f'<div class="metric-container" style="border-bottom: 4px solid #F1C40F;"><div class="label-custom">STABILITÉ</div><div style="font-size:0.85em; margin-top:5px;">🥇 {res["n1"]} ({get_camelot_pro(res["n1"])}) <b>{res["c1"]}%</b></div><div style="font-size:0.85em;">🥈 {res["n2"]} ({get_camelot_pro(res["n2"])}) <b>{res["c2"]}%</b></div></div>', unsafe_allow_html=True)
+                    # Ajout des témoins pour la stabilité (n1 et n2)
+                    col_s1, col_s2 = st.columns(2)
+                    with col_s1: get_sine_witness(res["n1"], f"s1_{fid}")
+                    with col_s2: get_sine_witness(res["n2"], f"s2_{fid}")
                 with c4:
                     st.markdown(f'<div class="metric-container"><div class="label-custom">BPM & ENERGIE</div><div class="value-custom">{res["tempo"]}</div><div>E: {res["energy"]}/10</div></div>', unsafe_allow_html=True)
 
