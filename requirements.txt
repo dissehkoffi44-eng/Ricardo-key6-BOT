@@ -1,8 +1,7 @@
 streamlit
 librosa
-numpy<2.0.0
+numpy
 pandas
 plotly
-mutagen
-requests
-soundfile
+matplotlib
+scipy
