@@ -4,15 +4,13 @@ import numpy as np
 import pandas as pd
 import plotly.express as px
 from collections import Counter
-from datetime import datetime
 import io
 import streamlit.components.v1 as components
-from concurrent.futures import ThreadPoolExecutor
 import requests  
 import gc                
 
 # --- CONFIGURATION & CSS ---
-st.set_page_config(page_title="KEY V6.2 Perceptual", page_icon="🎧", layout="wide")
+st.set_page_config(page_title="KEY V6.2 Perceptual Pro", page_icon="🎧", layout="wide")
 
 st.markdown("""
     <style>
@@ -21,7 +19,6 @@ st.markdown("""
     .metric-container:hover { transform: translateY(-5px); border-color: #6366F1; }
     .label-custom { color: #666; font-size: 0.9em; font-weight: bold; margin-bottom: 5px; }
     .value-custom { font-size: 1.6em; font-weight: 800; color: #1A1A1A; }
-    .diag-box { text-align:center; padding:10px; border-radius:10px; border:1px solid #EEE; background: white; }
     
     .final-decision-box { 
         background: linear-gradient(135deg, #1e1e2f 0%, #6366F1 100%); 
@@ -36,8 +33,6 @@ st.markdown("""
 TELEGRAM_TOKEN = "7751365982:AAFLbeRoPsDx5OyIOlsgHcGKpI12hopzCYo"
 CHAT_ID = "-1003602454394" 
 
-if 'history' not in st.session_state:
-    st.session_state.history = []
 if 'processed_files' not in st.session_state:
     st.session_state.processed_files = {}
 if 'order_list' not in st.session_state:
@@ -52,7 +47,7 @@ def upload_to_telegram(file_buffer, filename, caption):
         data = {'chat_id': CHAT_ID, 'caption': caption}
         response = requests.post(url, files=files, data=data, timeout=30).json()
         return response.get("ok", False)
-    except Exception as e:
+    except:
         return False
 
 def get_sine_witness(note_mode_str, key_suffix=""):
@@ -77,12 +72,12 @@ def get_sine_witness(note_mode_str, key_suffix=""):
         osc.type = 'triangle';
         osc.frequency.setValueAtTime(freq, startTime);
         gain.gain.setValueAtTime(0, startTime);
-        gain.gain.linearRampToValueAtTime(0.2, startTime + 0.01); 
-        gain.gain.exponentialRampToValueAtTime(0.001, startTime + 2.5);
+        gain.gain.linearRampToValueAtTime(0.15, startTime + 0.01); 
+        gain.gain.exponentialRampToValueAtTime(0.001, startTime + 2.0);
         osc.connect(gain);
         gain.connect(masterGain);
         osc.start(startTime);
-        osc.stop(startTime + 2.5);
+        osc.stop(startTime + 2.0);
     }}
 
     document.getElementById('{unique_id}').onclick = function() {{
@@ -96,7 +91,7 @@ def get_sine_witness(note_mode_str, key_suffix=""):
             const now = audioCtx.currentTime;
             intervals.forEach((interval, index) => {{
                 let freq = notesFreq['{note}'] * Math.pow(2, interval / 12);
-                playPianoTone(freq, now + (index * 0.03));
+                playPianoTone(freq, now + (index * 0.04));
             }});
             setTimeout(() => {{
                 this.innerText = '▶'; this.style.background = '#6366F1';
@@ -109,6 +104,7 @@ def get_sine_witness(note_mode_str, key_suffix=""):
     </script>
     """, height=40)
 
+# Base Camelot (F# Minor = 11A selon vos instructions)
 BASE_CAMELOT_MINOR = {'Ab':'1A','G#':'1A','Eb':'2A','D#':'2A','Bb':'3A','A#':'3A','F':'4A','C':'5A','G':'6A','D':'7A','A':'8A','E':'9A','B':'10A','F#':'11A','Gb':'11A','Db':'12A','C#':'12A'}
 BASE_CAMELOT_MAJOR = {'B':'1B','F#':'2B','Gb':'2B','Db':'3B','C#':'3B','Ab':'4B','G#':'4B','Eb':'5B','D#':'5B','Bb':'6B','A#':'6B','F':'7B','C':'8B','G':'9B','D':'10B','A':'11B','E':'12B'}
 
@@ -124,22 +120,21 @@ def get_camelot_pro(key_mode_str):
 def analyze_segment_perceptual(y, sr, tuning=0.0):
     NOTES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
     
-    # Étape 1 : CQT (Constant-Q Transform) qui est plus proche de la perception logarithmique de l'oreille
+    # 1. Constant-Q Transform (CQT) : correspond à l'oreille humaine
     cqt = np.abs(librosa.cqt(y, sr=sr, fmin=librosa.note_to_hz('C1'), n_bins=84, tuning=tuning))
     
-    # Étape 2 : Application d'un poids perceptuel (A-weighting) sur les fréquences
+    # 2. Pondération A (A-weighting) sur les fréquences CQT
     freqs = librosa.cqt_frequencies(n_bins=84, fmin=librosa.note_to_hz('C1'))
     weights = librosa.A_weighting(freqs)
     cqt_weighted = cqt * librosa.db_to_amplitude(weights[:, np.newaxis])
     
-    # Étape 3 : Conversion en Chroma à partir du CQT pondéré
+    # 3. Chroma à partir du CQT pondéré
     chroma = librosa.feature.chroma_cqt(C=cqt_weighted, sr=sr)
     chroma_avg = np.mean(chroma, axis=1)
     
     PROFILES = {
         "major": [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88], 
-        "minor": [6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17], 
-        "dorian": [6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 2.69, 3.98, 3.34, 3.17]
+        "minor": [6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17]
     }
     
     best_score, res_key = -1, ""
@@ -150,12 +145,13 @@ def analyze_segment_perceptual(y, sr, tuning=0.0):
                 best_score, res_key = score, f"{NOTES[i]} {mode}"
     return res_key, best_score, chroma_avg
 
-@st.cache_data(show_spinner="Analyse Psychoacoustique V6.2...", max_entries=20)
+@st.cache_data(show_spinner="Analyse Psychoacoustique...", max_entries=10)
 def get_full_analysis(file_bytes, file_name):
-    y, sr = librosa.load(io.BytesIO(file_bytes), sr=None)
+    # Charge à 22050Hz pour économiser la RAM sur Streamlit Cloud
+    y, sr = librosa.load(io.BytesIO(file_bytes), sr=22050)
     tuning_offset = librosa.estimate_tuning(y=y, sr=sr)
     
-    # Filtrage Harmonique/Percussif pour isoler les notes de la batterie
+    # HPSS : On garde uniquement la partie harmonique (mélodique) pour la clé
     y_harm = librosa.effects.hpss(y)[0]
     
     duration = librosa.get_duration(y=y, sr=sr)
@@ -164,64 +160,57 @@ def get_full_analysis(file_bytes, file_name):
     # Analyse par segments de 10s
     for start_t in range(0, int(duration) - 10, 10):
         y_seg = y_harm[int(start_t*sr):int((start_t+10)*sr)]
+        if len(y_seg) < 1000: continue
+        
         key_seg, score_seg, chroma_vec = analyze_segment_perceptual(y_seg, sr, tuning=tuning_offset)
         votes.append(key_seg)
         all_chromas.append(chroma_vec)
         timeline_data.append({"Temps": start_t, "Note": key_seg, "Confiance": round(float(score_seg) * 100, 1)})
     
-    # Vote Majoritaire
+    # Résultats statistiques
     counts = Counter(votes)
     dominante_vote = counts.most_common(1)[0][0]
     dominante_conf = int((counts[dominante_vote] / len(votes)) * 100)
     
-    # Synthèse globale pondérée
+    # Synthèse globale par moyenne des chromas
     avg_chroma_global = np.mean(all_chromas, axis=0)
     NOTES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
-    PROFILES_S = {"major": [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88], "minor": [6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17]}
     best_synth_score, tonique_synth = -1, ""
-    for mode, profile in PROFILES_S.items():
+    for mode in ["major", "minor"]:
+        profile = [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88] if mode=="major" else [6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17]
         for i in range(12):
             score = np.corrcoef(avg_chroma_global, np.roll(profile, i))[0, 1]
             if score > best_synth_score: best_synth_score, tonique_synth = score, f"{NOTES[i]} {mode}"
 
-    # Calcul de l'énergie Perceptuelle (Loudness)
-    S = np.abs(librosa.stft(y))
-    # librosa.perceptual_weighting utilise la courbe de pondération A
-    perceptual_S = librosa.perceptual_weighting(S**2, freqs=librosa.fft_frequencies(sr=sr))
-    loudness = np.mean(perceptual_S)
-    
+    # Calcul Energie/BPM
     tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
-    energy_score = int(np.clip((loudness / 10) + (float(tempo)/150), 1, 10))
+    # Loudness simplifié basé sur le spectrogramme
+    S = np.abs(librosa.stft(y, n_fft=2048))
+    rms = librosa.feature.rms(S=S)
+    energy_score = int(np.clip(np.mean(rms)*60 + (float(tempo)/160), 1, 10))
 
-    # Recommandation finale basée sur la stabilité temporelle (n1/c1)
+    # Classement stabilité
     df_tl = pd.DataFrame(timeline_data)
-    df_s = df_tl.sort_values(by="Confiance", ascending=False).reset_index()
-    n1 = df_s.loc[0, 'Note'] if not df_s.empty else "??"
-    c1_val = df_s.loc[0, 'Confiance'] if not df_s.empty else 0
-    n2 = "??"; c2_val = 0
-    if not df_s.empty:
-        for idx, row in df_s.iterrows():
+    n1 = dominante_vote; c1_val = dominante_conf; n2 = "??"; c2_val = 0
+    if not df_tl.empty:
+        df_s = df_tl.sort_values(by="Confiance", ascending=False)
+        n1 = df_s.iloc[0]['Note']; c1_val = df_s.iloc[0]['Confiance']
+        for _, row in df_s.iterrows():
             if row['Note'] != n1:
                 n2 = row['Note']; c2_val = row['Confiance']; break
 
-    # Le système "recommande" la note qui a le plus haut score de corrélation perceptuelle
-    synth_conf = int(best_synth_score*100)
-    candidates = [{"note": dominante_vote, "conf": dominante_conf}, {"note": tonique_synth, "conf": synth_conf}, {"note": n1, "conf": c1_val}]
-    recommended = max(candidates, key=lambda x: x['conf'])
+    # Décision finale (recommandation)
+    candidates = [{"n": dominante_vote, "c": dominante_conf}, {"n": tonique_synth, "c": int(best_synth_score*100)}, {"n": n1, "c": c1_val}]
+    final_res = max(candidates, key=lambda x: x['c'])
 
     return {
         "file_name": file_name, "vote": dominante_vote, "vote_conf": dominante_conf, 
-        "synthese": tonique_synth, "confidence": synth_conf, "tempo": int(float(tempo)), 
-        "energy": energy_score, "timeline": timeline_data, "n1": n1, "c1": c1_val, "n2": n2, "c2": c2_val, "recommended": recommended
+        "synthese": tonique_synth, "confidence": int(best_synth_score*100), "tempo": int(float(tempo)), 
+        "energy": energy_score, "timeline": timeline_data, "n1": n1, "c1": c1_val, "n2": n2, "c2": c2_val, "recommended": final_res
     }
 
 # --- INTERFACE ---
 st.markdown("<h1 style='text-align: center;'>🎧 KEY V6.2 PERCEPTUAL</h1>", unsafe_allow_html=True)
-
-with st.sidebar:
-    st.header("⚙️ OPTIONS")
-    if st.button("🧹 VIDER TOUT"):
-        st.session_state.processed_files = {}; st.session_state.order_list = []; st.cache_data.clear(); gc.collect(); st.rerun()
 
 files = st.file_uploader("📂 ANALYSE PSYCHOACOUSTIQUE", type=['mp3', 'wav', 'flac'], accept_multiple_files=True)
 tabs = st.tabs(["📁 ANALYSEUR", "🕒 HISTORIQUE"])
@@ -239,9 +228,9 @@ with tabs[0]:
                         f"🎵 {res['file_name']}\n"
                         f"🥁 BPM: {res['tempo']} | E: {res['energy']}/10\n"
                         f"━━━━━━━━━━━━━━━\n"
-                        f"👂 CHOIX OREILLE: {res['recommended']['note']} ({get_camelot_pro(res['recommended']['note'])}) • {res['recommended']['conf']}%\n"
-                        f"💎 SYNTHÈSE: {res['synthese']} ({get_camelot_pro(res['synthese'])}) • {res['confidence']}%\n"
-                        f"📊 DOMINANTE: {res['vote']} ({get_camelot_pro(res['vote'])}) • {res['vote_conf']}%"
+                        f"👂 OREILLE: {res['recommended']['n']} ({get_camelot_pro(res['recommended']['n'])}) • {res['recommended']['c']}%\n"
+                        f"💎 SYNTHÈSE: {res['synthese']} • {res['confidence']}%\n"
+                        f"📊 DOMINANTE: {res['vote']} • {res['vote_conf']}%"
                     )
                     upload_to_telegram(io.BytesIO(f_bytes), f.name, tg_caption)
                     st.session_state.processed_files[file_id] = res
@@ -252,9 +241,9 @@ with tabs[0]:
             with st.expander(f"🎵 {res['file_name']}", expanded=True):
                 st.markdown(f"""
                     <div class="final-decision-box">
-                        <div style="font-size: 1em; opacity: 0.8; letter-spacing: 1px;">MEILLEURE NOTE (PERCEPTION HUMAINE)</div>
-                        <div style="font-size: 3.8em; font-weight: 900; margin: 5px 0; line-height:1;">{res['recommended']['note']}</div>
-                        <div style="font-size: 1.6em; font-weight: 700; color: #F1C40F;">{get_camelot_pro(res['recommended']['note'])} • {res['recommended']['conf']}% FIABILITÉ</div>
+                        <div style="font-size: 1em; opacity: 0.8; letter-spacing: 1px;">NOTE RECOMMANDÉE (PERCEPTION)</div>
+                        <div style="font-size: 3.8em; font-weight: 900; margin: 5px 0; line-height:1;">{res['recommended']['n']}</div>
+                        <div style="font-size: 1.6em; font-weight: 700; color: #F1C40F;">{get_camelot_pro(res['recommended']['n'])} • {res['recommended']['c']}% FIABILITÉ</div>
                     </div>
                 """, unsafe_allow_html=True)
 
@@ -263,10 +252,10 @@ with tabs[0]:
                     st.markdown(f'<div class="metric-container"><div class="label-custom">DOMINANTE</div><div class="value-custom">{res["vote"]}</div><div>{get_camelot_pro(res["vote"])} • {res["vote_conf"]}%</div></div>', unsafe_allow_html=True)
                     get_sine_witness(res["vote"], f"dom_{fid}")
                 with c2:
-                    st.markdown(f'<div class="metric-container" style="border-bottom: 4px solid #6366F1;"><div class="label-custom">SYNTHÈSE</div><div class="value-custom">{res["synthese"]}</div><div>{get_camelot_pro(res["synthese"])} • {res["confidence"]}%</div></div>', unsafe_allow_html=True)
+                    st.markdown(f'<div class="metric-container"><div class="label-custom">SYNTHÈSE</div><div class="value-custom">{res["synthese"]}</div><div>{get_camelot_pro(res["synthese"])} • {res["confidence"]}%</div></div>', unsafe_allow_html=True)
                     get_sine_witness(res["synthese"], f"synth_{fid}")
                 with c3:
-                    st.markdown(f'<div class="metric-container" style="border-bottom: 4px solid #F1C40F;"><div class="label-custom">STABILITÉ</div><div style="font-size:0.85em; margin-top:5px;">🥇 {res["n1"]} <b>{res["c1"]}%</b></div><div style="font-size:0.85em;">🥈 {res["n2"]} <b>{res["c2"]}%</b></div></div>', unsafe_allow_html=True)
+                    st.markdown(f'<div class="metric-container"><div class="label-custom">STABILITÉ</div><div style="font-size:0.85em; margin-top:5px;">🥇 {res["n1"]} <b>{res["c1"]}%</b></div><div style="font-size:0.85em;">🥈 {res["n2"]} <b>{res["c2"]}%</b></div></div>', unsafe_allow_html=True)
                     col_s1, col_s2 = st.columns(2)
                     with col_s1: get_sine_witness(res["n1"], f"s1_{fid}")
                     with col_s2: get_sine_witness(res["n2"], f"s2_{fid}")
@@ -277,5 +266,5 @@ with tabs[0]:
 
 with tabs[1]:
     if st.session_state.processed_files:
-        hist_data = [{"Fichier": r["file_name"], "Note": r["recommended"]["note"], "Camelot": get_camelot_pro(r["recommended"]["note"]), "BPM": r["tempo"]} for r in st.session_state.processed_files.values()]
+        hist_data = [{"Fichier": r["file_name"], "Note": r["recommended"]["n"], "Camelot": get_camelot_pro(r["recommended"]["n"]), "BPM": r["tempo"]} for r in st.session_state.processed_files.values()]
         st.dataframe(pd.DataFrame(hist_data), use_container_width=True)
