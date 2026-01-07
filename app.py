@@ -7,7 +7,7 @@ import os
 import tempfile
 
 # --- CONFIGURATION ---
-st.set_page_config(page_title="Audio Perception AI - Pro", layout="wide")
+st.set_page_config(page_title="DJ Ricardo's musical ear", layout="wide")
 
 # Récupération sécurisée des secrets (Configurés dans Streamlit Cloud ou .streamlit/secrets.toml)
 TELEGRAM_TOKEN = st.secrets.get("TELEGRAM_TOKEN")
@@ -72,7 +72,7 @@ def analyze_human_perception(file_path, original_filename):
     return chroma_vals, final_key, final_tone
 
 # --- INTERFACE UTILISATEUR ---
-st.title("🧠 Perception Auditive AI (Multi-Profils)")
+st.title("DJ Ricardo's musical ear 👂 ")
 st.markdown("Analyse spectrale et détection de tonalité basée sur les profils harmoniques.")
 st.markdown("---")
 
