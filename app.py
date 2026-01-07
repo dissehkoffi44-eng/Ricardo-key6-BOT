@@ -62,48 +62,75 @@ def get_sine_witness(note_mode_str, key_suffix=""):
     mode = parts[1].lower() if len(parts) > 1 else "major"
     unique_id = f"playBtn_{note}_{mode}_{key_suffix}".replace("#", "sharp").replace(".", "_")
     
-    # 
+    # Remplacement par un synthétiseur de type Piano (Web Audio API)
     return components.html(f"""
     <div style="display: flex; align-items: center; justify-content: center; gap: 10px; font-family: sans-serif;">
         <button id="{unique_id}" style="background: #6366F1; color: white; border: none; border-radius: 50%; width: 28px; height: 28px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 12px;">▶</button>
-        <span style="font-size: 9px; font-weight: bold; color: #666;">{note} {mode[:3].upper()} CHORD</span>
+        <span style="font-size: 9px; font-weight: bold; color: #666;">{note} {mode[:3].upper()} PIANO</span>
     </div>
     <script>
     const notesFreq = {{'C':261.63,'C#':277.18,'D':293.66,'D#':311.13,'E':329.63,'F':349.23,'F#':369.99,'G':392.00,'G#':415.30,'A':440.00,'A#':466.16,'B':493.88}};
-    let audioCtx = null; let oscillators = []; let gainNode = null;
-    
+    let audioCtx = null;
+    let masterGain = null;
+
+    function playPianoTone(freq, startTime) {{
+        // Création de l'oscillateur principal (corps du son)
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        
+        osc.type = 'triangle'; // Son plus doux pour le piano
+        osc.frequency.setValueAtTime(freq, startTime);
+        
+        // Enveloppe de Piano (Attaque rapide, déclin exponentiel)
+        gain.gain.setValueAtTime(0, startTime);
+        gain.gain.linearRampToValueAtTime(0.2, startTime + 0.01); 
+        gain.gain.exponentialRampToValueAtTime(0.001, startTime + 2.5);
+        
+        osc.connect(gain);
+        gain.connect(masterGain);
+        
+        osc.start(startTime);
+        osc.stop(startTime + 2.5);
+        
+        // Ajout d'une harmonique pour le timbre
+        const osc2 = audioCtx.createOscillator();
+        const gain2 = audioCtx.createGain();
+        osc2.type = 'sine';
+        osc2.frequency.setValueAtTime(freq * 2, startTime);
+        gain2.gain.setValueAtTime(0, startTime);
+        gain2.gain.linearRampToValueAtTime(0.05, startTime + 0.01);
+        gain2.gain.exponentialRampToValueAtTime(0.001, startTime + 1.5);
+        osc2.connect(gain2);
+        gain2.connect(masterGain);
+        osc2.start(startTime);
+        osc2.stop(startTime + 1.5);
+    }}
+
     document.getElementById('{unique_id}').onclick = function() {{
         if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
         
         if (this.innerText === '▶') {{
             this.innerText = '◼'; this.style.background = '#E74C3C';
             
-            gainNode = audioCtx.createGain();
-            gainNode.gain.setValueAtTime(0, audioCtx.currentTime);
-            gainNode.gain.linearRampToValueAtTime(0.1, audioCtx.currentTime + 0.1); // Fade in pour éviter le clic
-            gainNode.connect(audioCtx.destination);
+            masterGain = audioCtx.createGain();
+            masterGain.connect(audioCtx.destination);
             
-            // Définition de l'accord : Fondamentale, Tierce (Maj/Min), Quinte
             const isMinor = '{mode}' === 'minor' || '{mode}' === 'dorian';
-            const intervals = isMinor ? [0, 3, 7] : [0, 4, 7];
+            const intervals = isMinor ? [0, 3, 7, 12] : [0, 4, 7, 12];
             
-            intervals.forEach(interval => {{
-                let osc = audioCtx.createOscillator();
-                osc.type = 'triangle'; // Son un peu plus riche que 'sine' pour un accord
+            const now = audioCtx.currentTime;
+            intervals.forEach((interval, index) => {{
                 let freq = notesFreq['{note}'] * Math.pow(2, interval / 12);
-                osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
-                osc.connect(gainNode);
-                osc.start();
-                oscillators.push(osc);
+                // Léger décalage (strum) pour faire plus naturel
+                playPianoTone(freq, now + (index * 0.03));
             }});
+
+            setTimeout(() => {{
+                this.innerText = '▶'; this.style.background = '#6366F1';
+            }}, 2000);
+            
         }} else {{
-            if(gainNode) {{
-                gainNode.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 0.1); // Fade out
-                setTimeout(() => {{
-                    oscillators.forEach(o => o.stop());
-                    oscillators = [];
-                }}, 100);
-            }}
+            if(masterGain) masterGain.gain.setTargetAtTime(0, audioCtx.currentTime, 0.1);
             this.innerText = '▶'; this.style.background = '#6366F1';
         }}
     }};
@@ -277,7 +304,6 @@ with tabs[0]:
                     get_sine_witness(res["synthese"], f"synth_{fid}")
                 with c3:
                     st.markdown(f'<div class="metric-container" style="border-bottom: 4px solid #F1C40F;"><div class="label-custom">STABILITÉ</div><div style="font-size:0.85em; margin-top:5px;">🥇 {res["n1"]} ({get_camelot_pro(res["n1"])}) <b>{res["c1"]}%</b></div><div style="font-size:0.85em;">🥈 {res["n2"]} ({get_camelot_pro(res["n2"])}) <b>{res["c2"]}%</b></div></div>', unsafe_allow_html=True)
-                    # Ajout des témoins pour la stabilité (n1 et n2)
                     col_s1, col_s2 = st.columns(2)
                     with col_s1: get_sine_witness(res["n1"], f"s1_{fid}")
                     with col_s2: get_sine_witness(res["n2"], f"s2_{fid}")
