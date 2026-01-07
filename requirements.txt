@@ -1,6 +1,8 @@
-streamlit==1.31.0
-librosa==0.10.1
-numpy==1.26.4
+streamlit
+librosa
+numpy
 pandas
 plotly
 matplotlib
+requests
+soundfile
