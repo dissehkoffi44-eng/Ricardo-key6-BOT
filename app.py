@@ -12,7 +12,7 @@ import requests
 import gc                
 
 # --- CONFIGURATION & CSS ---
-st.set_page_config(page_title="KEY V6% ", page_icon="🎧", layout="wide")
+st.set_page_config(page_title="KEY V6.2 Perceptual", page_icon="🎧", layout="wide")
 
 st.markdown("""
     <style>
@@ -36,7 +36,6 @@ st.markdown("""
 TELEGRAM_TOKEN = "7751365982:AAFLbeRoPsDx5OyIOlsgHcGKpI12hopzCYo"
 CHAT_ID = "-1003602454394" 
 
-# Initialisation des états
 if 'history' not in st.session_state:
     st.session_state.history = []
 if 'processed_files' not in st.session_state:
@@ -62,7 +61,6 @@ def get_sine_witness(note_mode_str, key_suffix=""):
     mode = parts[1].lower() if len(parts) > 1 else "major"
     unique_id = f"playBtn_{note}_{mode}_{key_suffix}".replace("#", "sharp").replace(".", "_")
     
-    # Remplacement par un synthétiseur de type Piano (Web Audio API)
     return components.html(f"""
     <div style="display: flex; align-items: center; justify-content: center; gap: 10px; font-family: sans-serif;">
         <button id="{unique_id}" style="background: #6366F1; color: white; border: none; border-radius: 50%; width: 28px; height: 28px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 12px;">▶</button>
@@ -74,61 +72,35 @@ def get_sine_witness(note_mode_str, key_suffix=""):
     let masterGain = null;
 
     function playPianoTone(freq, startTime) {{
-        // Création de l'oscillateur principal (corps du son)
         const osc = audioCtx.createOscillator();
         const gain = audioCtx.createGain();
-        
-        osc.type = 'triangle'; // Son plus doux pour le piano
+        osc.type = 'triangle';
         osc.frequency.setValueAtTime(freq, startTime);
-        
-        // Enveloppe de Piano (Attaque rapide, déclin exponentiel)
         gain.gain.setValueAtTime(0, startTime);
         gain.gain.linearRampToValueAtTime(0.2, startTime + 0.01); 
         gain.gain.exponentialRampToValueAtTime(0.001, startTime + 2.5);
-        
         osc.connect(gain);
         gain.connect(masterGain);
-        
         osc.start(startTime);
         osc.stop(startTime + 2.5);
-        
-        // Ajout d'une harmonique pour le timbre
-        const osc2 = audioCtx.createOscillator();
-        const gain2 = audioCtx.createGain();
-        osc2.type = 'sine';
-        osc2.frequency.setValueAtTime(freq * 2, startTime);
-        gain2.gain.setValueAtTime(0, startTime);
-        gain2.gain.linearRampToValueAtTime(0.05, startTime + 0.01);
-        gain2.gain.exponentialRampToValueAtTime(0.001, startTime + 1.5);
-        osc2.connect(gain2);
-        gain2.connect(masterGain);
-        osc2.start(startTime);
-        osc2.stop(startTime + 1.5);
     }}
 
     document.getElementById('{unique_id}').onclick = function() {{
         if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-        
         if (this.innerText === '▶') {{
             this.innerText = '◼'; this.style.background = '#E74C3C';
-            
             masterGain = audioCtx.createGain();
             masterGain.connect(audioCtx.destination);
-            
             const isMinor = '{mode}' === 'minor' || '{mode}' === 'dorian';
             const intervals = isMinor ? [0, 3, 7, 12] : [0, 4, 7, 12];
-            
             const now = audioCtx.currentTime;
             intervals.forEach((interval, index) => {{
                 let freq = notesFreq['{note}'] * Math.pow(2, interval / 12);
-                // Léger décalage (strum) pour faire plus naturel
                 playPianoTone(freq, now + (index * 0.03));
             }});
-
             setTimeout(() => {{
                 this.innerText = '▶'; this.style.background = '#6366F1';
             }}, 2000);
-            
         }} else {{
             if(masterGain) masterGain.gain.setTargetAtTime(0, audioCtx.currentTime, 0.1);
             this.innerText = '▶'; this.style.background = '#6366F1';
@@ -148,22 +120,28 @@ def get_camelot_pro(key_mode_str):
         else: return BASE_CAMELOT_MAJOR.get(key, "??")
     except: return "??"
 
-# --- MOTEUR ANALYSE ---
-def check_drum_alignment(y, sr):
-    flatness = np.mean(librosa.feature.spectral_flatness(y=y))
-    chroma = librosa.feature.chroma_cqt(y=y, sr=sr)
-    chroma_max_mean = np.mean(np.max(chroma, axis=0))
-    return flatness < 0.045 or chroma_max_mean > 0.75
-
-def analyze_segment(y, sr, tuning=0.0):
+# --- MOTEUR ANALYSE PERCEPTUELLE ---
+def analyze_segment_perceptual(y, sr, tuning=0.0):
     NOTES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
-    chroma = librosa.feature.chroma_cens(y=y, sr=sr, hop_length=512, n_chroma=12, tuning=tuning)
+    
+    # Étape 1 : CQT (Constant-Q Transform) qui est plus proche de la perception logarithmique de l'oreille
+    cqt = np.abs(librosa.cqt(y, sr=sr, fmin=librosa.note_to_hz('C1'), n_bins=84, tuning=tuning))
+    
+    # Étape 2 : Application d'un poids perceptuel (A-weighting) sur les fréquences
+    freqs = librosa.cqt_frequencies(n_bins=84, fmin=librosa.note_to_hz('C1'))
+    weights = librosa.A_weighting(freqs)
+    cqt_weighted = cqt * librosa.db_to_amplitude(weights[:, np.newaxis])
+    
+    # Étape 3 : Conversion en Chroma à partir du CQT pondéré
+    chroma = librosa.feature.chroma_cqt(C=cqt_weighted, sr=sr)
     chroma_avg = np.mean(chroma, axis=1)
+    
     PROFILES = {
         "major": [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88], 
         "minor": [6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17], 
         "dorian": [6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 2.69, 3.98, 3.34, 3.17]
     }
+    
     best_score, res_key = -1, ""
     for mode, profile in PROFILES.items():
         for i in range(12):
@@ -172,87 +150,80 @@ def analyze_segment(y, sr, tuning=0.0):
                 best_score, res_key = score, f"{NOTES[i]} {mode}"
     return res_key, best_score, chroma_avg
 
-@st.cache_data(show_spinner="Analyse Multi-Couches V6.1 Hybrid...", max_entries=20)
+@st.cache_data(show_spinner="Analyse Psychoacoustique V6.2...", max_entries=20)
 def get_full_analysis(file_bytes, file_name):
-    y, sr = librosa.load(io.BytesIO(file_bytes), sr=None, res_type='kaiser_fast')
+    y, sr = librosa.load(io.BytesIO(file_bytes), sr=None)
     tuning_offset = librosa.estimate_tuning(y=y, sr=sr)
-    is_aligned = check_drum_alignment(y, sr)
-    y_final, filter_applied = (y, False) if is_aligned else (librosa.effects.hpss(y)[0], True)
     
-    duration = librosa.get_duration(y=y_final, sr=sr)
+    # Filtrage Harmonique/Percussif pour isoler les notes de la batterie
+    y_harm = librosa.effects.hpss(y)[0]
+    
+    duration = librosa.get_duration(y=y, sr=sr)
     timeline_data, votes, all_chromas = [], [], []
     
+    # Analyse par segments de 10s
     for start_t in range(0, int(duration) - 10, 10):
-        y_seg = y_final[int(start_t*sr):int((start_t+10)*sr)]
-        key_seg, score_seg, chroma_vec = analyze_segment(y_seg, sr, tuning=tuning_offset)
+        y_seg = y_harm[int(start_t*sr):int((start_t+10)*sr)]
+        key_seg, score_seg, chroma_vec = analyze_segment_perceptual(y_seg, sr, tuning=tuning_offset)
         votes.append(key_seg)
         all_chromas.append(chroma_vec)
         timeline_data.append({"Temps": start_t, "Note": key_seg, "Confiance": round(float(score_seg) * 100, 1)})
     
+    # Vote Majoritaire
     counts = Counter(votes)
     dominante_vote = counts.most_common(1)[0][0]
     dominante_conf = int((counts[dominante_vote] / len(votes)) * 100)
-    avg_chroma_global = np.mean(all_chromas, axis=0)
     
-    PROFILES_SYNTH = {"major": [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88], "minor": [6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17]}
-    best_synth_score, tonique_synth = -1, ""
+    # Synthèse globale pondérée
+    avg_chroma_global = np.mean(all_chromas, axis=0)
     NOTES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
-    for mode, profile in PROFILES_SYNTH.items():
+    PROFILES_S = {"major": [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88], "minor": [6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17]}
+    best_synth_score, tonique_synth = -1, ""
+    for mode, profile in PROFILES_S.items():
         for i in range(12):
             score = np.corrcoef(avg_chroma_global, np.roll(profile, i))[0, 1]
             if score > best_synth_score: best_synth_score, tonique_synth = score, f"{NOTES[i]} {mode}"
 
-    top_votes = Counter(votes).most_common(2)
-    purity = int((top_votes[0][1] / len(votes)) * 100)
-    key_shift_detected = True if len(top_votes) > 1 and (top_votes[1][1] / len(votes)) > 0.25 else False
+    # Calcul de l'énergie Perceptuelle (Loudness)
+    S = np.abs(librosa.stft(y))
+    # librosa.perceptual_weighting utilise la courbe de pondération A
+    perceptual_S = librosa.perceptual_weighting(S**2, freqs=librosa.fft_frequencies(sr=sr))
+    loudness = np.mean(perceptual_S)
+    
     tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
-    energy = int(np.clip(np.mean(librosa.feature.rms(y=y))*35 + (float(tempo)/160), 1, 10))
+    energy_score = int(np.clip((loudness / 10) + (float(tempo)/150), 1, 10))
 
-    # --- CALCULS ADDITIONNELS POUR LE RAPPORT ---
+    # Recommandation finale basée sur la stabilité temporelle (n1/c1)
     df_tl = pd.DataFrame(timeline_data)
     df_s = df_tl.sort_values(by="Confiance", ascending=False).reset_index()
     n1 = df_s.loc[0, 'Note'] if not df_s.empty else "??"
     c1_val = df_s.loc[0, 'Confiance'] if not df_s.empty else 0
-    n2 = n1
-    c2_val = 0
+    n2 = "??"; c2_val = 0
     if not df_s.empty:
         for idx, row in df_s.iterrows():
             if row['Note'] != n1:
-                n2 = row['Note']
-                c2_val = row['Confiance']
-                break
-    
+                n2 = row['Note']; c2_val = row['Confiance']; break
+
+    # Le système "recommande" la note qui a le plus haut score de corrélation perceptuelle
     synth_conf = int(best_synth_score*100)
-    candidates = [
-        {"note": dominante_vote, "conf": dominante_conf},
-        {"note": tonique_synth, "conf": synth_conf},
-        {"note": n1, "conf": c1_val}
-    ]
+    candidates = [{"note": dominante_vote, "conf": dominante_conf}, {"note": tonique_synth, "conf": synth_conf}, {"note": n1, "conf": c1_val}]
     recommended = max(candidates, key=lambda x: x['conf'])
 
     return {
-        "file_name": file_name,
-        "vote": dominante_vote, "vote_conf": dominante_conf, 
+        "file_name": file_name, "vote": dominante_vote, "vote_conf": dominante_conf, 
         "synthese": tonique_synth, "confidence": synth_conf, "tempo": int(float(tempo)), 
-        "energy": energy, "timeline": timeline_data, "purity": purity, 
-        "key_shift": key_shift_detected, "secondary": top_votes[1][0] if len(top_votes)>1 else top_votes[0][0],
-        "n1": n1, "c1": c1_val, "n2": n2, "c2": c2_val, "recommended": recommended
+        "energy": energy_score, "timeline": timeline_data, "n1": n1, "c1": c1_val, "n2": n2, "c2": c2_val, "recommended": recommended
     }
 
 # --- INTERFACE ---
-st.markdown("<h1 style='text-align: center;'>🎧 KEY V6</h1>", unsafe_allow_html=True)
+st.markdown("<h1 style='text-align: center;'>🎧 KEY V6.2 PERCEPTUAL</h1>", unsafe_allow_html=True)
 
 with st.sidebar:
-    st.header("⚙️ MAINTENANCE")
+    st.header("⚙️ OPTIONS")
     if st.button("🧹 VIDER TOUT"):
-        st.session_state.history = []
-        st.session_state.processed_files = {}
-        st.session_state.order_list = []
-        st.cache_data.clear()
-        gc.collect()
-        st.rerun()
+        st.session_state.processed_files = {}; st.session_state.order_list = []; st.cache_data.clear(); gc.collect(); st.rerun()
 
-files = st.file_uploader("📂 DÉPOSEZ VOS TRACKS ICI", type=['mp3', 'wav', 'flac'], accept_multiple_files=True)
+files = st.file_uploader("📂 ANALYSE PSYCHOACOUSTIQUE", type=['mp3', 'wav', 'flac'], accept_multiple_files=True)
 tabs = st.tabs(["📁 ANALYSEUR", "🕒 HISTORIQUE"])
 
 with tabs[0]:
@@ -260,23 +231,18 @@ with tabs[0]:
         for f in files:
             file_id = f"{f.name}_{f.size}"
             if file_id not in st.session_state.processed_files:
-                with st.spinner(f"Traitement : {f.name}"):
+                with st.spinner(f"Analyse humaine : {f.name}"):
                     f_bytes = f.read()
                     res = get_full_analysis(f_bytes, f.name)
                     
-                    # --- CONSTRUCTION DU CAPTION TELEGRAM AVEC POURCENTAGES ---
                     tg_caption = (
                         f"🎵 {res['file_name']}\n"
                         f"🥁 BPM: {res['tempo']} | E: {res['energy']}/10\n"
                         f"━━━━━━━━━━━━━━━\n"
-                        f"🔥 RECOMMANDÉ: {res['recommended']['note']} ({get_camelot_pro(res['recommended']['note'])}) • {res['recommended']['conf']}%\n"
+                        f"👂 CHOIX OREILLE: {res['recommended']['note']} ({get_camelot_pro(res['recommended']['note'])}) • {res['recommended']['conf']}%\n"
                         f"💎 SYNTHÈSE: {res['synthese']} ({get_camelot_pro(res['synthese'])}) • {res['confidence']}%\n"
-                        f"📊 DOMINANTE: {res['vote']} ({get_camelot_pro(res['vote'])}) • {res['vote_conf']}%\n"
-                        f"⚖️ STABILITÉ:\n"
-                        f"🥇 {res['n1']} ({get_camelot_pro(res['n1'])}) • {res['c1']}%\n"
-                        f"🥈 {res['n2']} ({get_camelot_pro(res['n2'])}) • {res['c2']}%"
+                        f"📊 DOMINANTE: {res['vote']} ({get_camelot_pro(res['vote'])}) • {res['vote_conf']}%"
                     )
-                    
                     upload_to_telegram(io.BytesIO(f_bytes), f.name, tg_caption)
                     st.session_state.processed_files[file_id] = res
                     st.session_state.order_list.insert(0, file_id)
@@ -284,17 +250,14 @@ with tabs[0]:
         for fid in st.session_state.order_list[:10]:
             res = st.session_state.processed_files[fid]
             with st.expander(f"🎵 {res['file_name']}", expanded=True):
-                
-                # --- AFFICHAGE CASE DÉCISIVE ---
                 st.markdown(f"""
                     <div class="final-decision-box">
-                        <div style="font-size: 1em; opacity: 0.8; letter-spacing: 1px;">NOTE RÉELLE RECOMMANDÉE</div>
+                        <div style="font-size: 1em; opacity: 0.8; letter-spacing: 1px;">MEILLEURE NOTE (PERCEPTION HUMAINE)</div>
                         <div style="font-size: 3.8em; font-weight: 900; margin: 5px 0; line-height:1;">{res['recommended']['note']}</div>
                         <div style="font-size: 1.6em; font-weight: 700; color: #F1C40F;">{get_camelot_pro(res['recommended']['note'])} • {res['recommended']['conf']}% FIABILITÉ</div>
                     </div>
                 """, unsafe_allow_html=True)
 
-                # --- LES 4 COLONNES ---
                 c1, c2, c3, c4 = st.columns(4)
                 with c1:
                     st.markdown(f'<div class="metric-container"><div class="label-custom">DOMINANTE</div><div class="value-custom">{res["vote"]}</div><div>{get_camelot_pro(res["vote"])} • {res["vote_conf"]}%</div></div>', unsafe_allow_html=True)
@@ -303,17 +266,16 @@ with tabs[0]:
                     st.markdown(f'<div class="metric-container" style="border-bottom: 4px solid #6366F1;"><div class="label-custom">SYNTHÈSE</div><div class="value-custom">{res["synthese"]}</div><div>{get_camelot_pro(res["synthese"])} • {res["confidence"]}%</div></div>', unsafe_allow_html=True)
                     get_sine_witness(res["synthese"], f"synth_{fid}")
                 with c3:
-                    st.markdown(f'<div class="metric-container" style="border-bottom: 4px solid #F1C40F;"><div class="label-custom">STABILITÉ</div><div style="font-size:0.85em; margin-top:5px;">🥇 {res["n1"]} ({get_camelot_pro(res["n1"])}) <b>{res["c1"]}%</b></div><div style="font-size:0.85em;">🥈 {res["n2"]} ({get_camelot_pro(res["n2"])}) <b>{res["c2"]}%</b></div></div>', unsafe_allow_html=True)
+                    st.markdown(f'<div class="metric-container" style="border-bottom: 4px solid #F1C40F;"><div class="label-custom">STABILITÉ</div><div style="font-size:0.85em; margin-top:5px;">🥇 {res["n1"]} <b>{res["c1"]}%</b></div><div style="font-size:0.85em;">🥈 {res["n2"]} <b>{res["c2"]}%</b></div></div>', unsafe_allow_html=True)
                     col_s1, col_s2 = st.columns(2)
                     with col_s1: get_sine_witness(res["n1"], f"s1_{fid}")
                     with col_s2: get_sine_witness(res["n2"], f"s2_{fid}")
                 with c4:
-                    st.markdown(f'<div class="metric-container"><div class="label-custom">BPM & ENERGIE</div><div class="value-custom">{res["tempo"]}</div><div>E: {res["energy"]}/10</div></div>', unsafe_allow_html=True)
+                    st.markdown(f'<div class="metric-container"><div class="label-custom">BPM & ENERGIE</div><div class="value-custom">{res["tempo"]}</div><div>E. Perceptuelle: {res["energy"]}/10</div></div>', unsafe_allow_html=True)
 
-                df_tl = pd.DataFrame(res['timeline'])
-                st.plotly_chart(px.scatter(df_tl, x="Temps", y="Note", color="Confiance", size="Confiance", template="plotly_white"), use_container_width=True)
+                st.plotly_chart(px.scatter(pd.DataFrame(res['timeline']), x="Temps", y="Note", color="Confiance", size="Confiance", template="plotly_white"), use_container_width=True)
 
 with tabs[1]:
     if st.session_state.processed_files:
-        hist_data = [{"Fichier": r["file_name"], "Note": r["synthese"], "Camelot": get_camelot_pro(r["synthese"]), "BPM": r["tempo"]} for r in st.session_state.processed_files.values()]
+        hist_data = [{"Fichier": r["file_name"], "Note": r["recommended"]["note"], "Camelot": get_camelot_pro(r["recommended"]["note"]), "BPM": r["tempo"]} for r in st.session_state.processed_files.values()]
         st.dataframe(pd.DataFrame(hist_data), use_container_width=True)
