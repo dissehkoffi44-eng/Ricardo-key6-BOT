@@ -4,9 +4,27 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import matplotlib.pyplot as plt
+import requests
 
 # Configuration
 st.set_page_config(page_title="Analyseur de Tonalité Intégral", layout="wide")
+
+# Paramètres Telegram (À remplir)
+TELEGRAM_TOKEN = st.secrets.get("TELEGRAM_TOKEN")
+CHAT_ID = st.secrets.get("CHAT_ID")
+
+def send_telegram_message(message):
+    """Envoie un message texte au canal Telegram via le Bot."""
+    url = f"https://api.telegram.org/bot{st.secrets.get("TELEGRAM_TOKEN")}/sendMessage"
+    payload = {
+        "st.secrets.get("CHAT_ID")": TELEGRAM_CHAT_ID,
+        "text": message,
+        "parse_mode": "Markdown"
+    }
+    try:
+        requests.post(url, json=payload)
+    except Exception as e:
+        st.error(f"Erreur lors de l'envoi Telegram : {e}")
 
 def get_camelot_key(key, tone):
     # Inclusion de votre règle personnalisée : F# Minor = 11A
@@ -73,8 +91,14 @@ if uploaded_file is not None:
             
             # Affichage des résultats
             c1, c2 = st.columns(2)
-            c1.metric("Tonalité Finale", f"{key} {tone}")
+            result_key = f"{key} {tone}"
+            c1.metric("Tonalité Finale", result_key)
             c2.metric("Code Camelot", camelot)
+            
+            # Envoi automatique vers Telegram
+            msg = f"🎵 *Nouvelle Analyse Audio*\n\n*Fichier :* {uploaded_file.name}\n*Tonalité :* {result_key}\n*Code Camelot :* {camelot}"
+            send_telegram_message(msg)
+            st.success("✅ Résultats envoyés sur Telegram !")
             
             # Graphique de l'énergie perçue sur tout le morceau
             st.subheader("Empreinte Tonale Globale")
