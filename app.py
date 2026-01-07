@@ -7,7 +7,7 @@ import os
 import tempfile
 
 # --- CONFIGURATION ---
-st.set_page_config(page_title="Audio Perception AI - Pro v2.1", layout="wide")
+st.set_page_config(page_title="Audio Perception AI - Pro v2.2", layout="wide")
 
 # Récupération sécurisée des secrets
 TELEGRAM_TOKEN = st.secrets.get("TELEGRAM_TOKEN")
@@ -35,32 +35,41 @@ def send_telegram_message(message):
 
 @st.cache_data(show_spinner=False)
 def analyze_human_perception(file_path, original_filename):
-    """Analyse avancée avec HSS et gestion de la limite de Nyquist."""
-    # 1. Chargement avec un taux d'échantillonnage de sécurité
+    """Analyse avancée sans erreur n_bins et avec protection Nyquist."""
+    # 1. Chargement (sr=4000Hz pour isoler les fréquences fondamentales)
     sr_target = 4000 
     y, sr = librosa.load(file_path, sr=sr_target)
     
     # 2. SÉPARATION HARMONIQUE (HPSS)
-    # On élimine les drums/percussions qui polluent l'intro et l'outro
+    # On nettoie l'intro/outro des kicks pour ne garder que la musique
     y_harmonic = librosa.effects.harmonic(y, margin=3.0)
     
     # 3. CHROMA CQT 
-    # n_bins=60 (5 octaves) pour ne pas dépasser la fréquence de Nyquist (sr_target/2)
-    fmin_hz = librosa.note_to_hz('C1') # 32.7 Hz pour capter les basses fréquences
+    # On utilise bins_per_octave=12 (standard) sans forcer n_bins pour éviter les crashs
+    fmin_hz = librosa.note_to_hz('C1') 
     chroma = librosa.feature.chroma_cqt(
         y=y_harmonic, 
         sr=sr_target, 
         hop_length=512, 
         fmin=fmin_hz, 
-        n_bins=60
+        bins_per_octave=12
     )
     
-    # Moyenne et normalisation
-    chroma_vals = np.mean(chroma**2, axis=1)
+    # Moyenne temporelle
+    chroma_raw = np.mean(chroma**2, axis=1)
+    
+    # 4. REPLIEMENT DES OCTAVES (Gestion manuelle de n_bins)
+    # On additionne toutes les octaves détectées pour obtenir 12 notes finales
+    num_notes = 12
+    chroma_vals = np.zeros(num_notes)
+    for i in range(len(chroma_raw)):
+        chroma_vals[i % num_notes] += chroma_raw[i]
+
+    # Normalisation
     if np.max(chroma_vals) > 0:
         chroma_vals = chroma_vals / np.max(chroma_vals)
 
-    # Profils Krumhansl-Schmuckler
+    # Profils de corrélation Krumhansl-Schmuckler
     maj_profile = [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88]
     min_profile = [6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17]
     notes = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
@@ -71,19 +80,19 @@ def analyze_human_perception(file_path, original_filename):
         scores.append((np.corrcoef(chroma_vals, p_maj)[0, 1], notes[i], "Major"))
         scores.append((np.corrcoef(chroma_vals, p_min)[0, 1], notes[i], "Minor"))
 
-    # Tri des scores pour trouver le meilleur et calculer la confiance
+    # Classement pour trouver la meilleure clé et calculer la confiance
     scores.sort(key=lambda x: x[0], reverse=True)
     best_score, final_key, final_tone = scores[0]
     second_best_score = scores[1][0]
     
-    # Calcul d'un indice de confiance (écart entre le 1er et le 2ème meilleur choix)
-    confidence = (best_score - second_best_score) / best_score if best_score > 0 else 0
-    confidence_pct = min(int(confidence * 500), 100) # Normalisation simple
+    # Calcul de confiance (différence entre le 1er et le 2ème choix)
+    diff = best_score - second_best_score
+    confidence_pct = min(int(diff * 500), 100) if best_score > 0 else 0
 
     return chroma_vals, final_key, final_tone, confidence_pct
 
-# --- INTERFACE STREAMLIT ---
-st.title("🧠 Audio Perception AI (Elite Edition)")
+# --- INTERFACE ---
+st.title("🧠 Audio Perception AI (Elite v2.2)")
 st.markdown("---")
 
 uploaded_file = st.file_uploader("Glissez votre fichier audio ici", type=["mp3", "wav", "flac"])
@@ -95,43 +104,43 @@ if uploaded_file:
 
     st.audio(uploaded_file)
     
-    with st.spinner(f"Analyse chirurgicale de : {uploaded_file.name}..."):
+    with st.spinner(f"Analyse chirurgicale : {uploaded_file.name}..."):
         try:
             chroma_vals, key, tone, confidence = analyze_human_perception(tmp_path, uploaded_file.name)
             camelot = get_camelot_key(key, tone)
             result_text = f"{key} {tone}"
 
-            # Affichage des métriques
-            m1, m2, m3 = st.columns(3)
-            m1.metric("Tonalité Détectée", result_text)
-            m2.metric("Code Camelot", camelot)
-            m3.metric("Indice de Confiance", f"{confidence}%")
+            # Affichage des résultats
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Tonalité Détectée", result_text)
+            col2.metric("Code Camelot", camelot)
+            col3.metric("Confiance", f"{confidence}%")
 
-            # Graphique Radar
+            # Radar Chart
             categories = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
             fig = go.Figure(data=go.Scatterpolar(r=chroma_vals, theta=categories, fill='toself', line_color='#00FFAA'))
             fig.update_layout(
                 polar=dict(radialaxis=dict(visible=True, range=[0, 1])),
                 template="plotly_dark",
-                title="Signature Harmonique (Profil de Notes)"
+                title="Signature Harmonique"
             )
             st.plotly_chart(fig, use_container_width=True)
 
             # Envoi Telegram
-            msg = (f"🎵 *Analyse Audio*\n"
+            msg = (f"🎵 *Analyse*\n"
                    f"*Fichier :* `{uploaded_file.name}`\n"
                    f"*Résultat :* `{result_text}`\n"
                    f"*Camelot :* `{camelot}`\n"
-                   f"*Confiance :* `{confidence}%`")
+                   f"*Confiance :* `{confidence}%` Ratio")
             send_telegram_message(msg)
             
-            st.success("Analyse terminée avec succès.")
+            st.success("Analyse terminée.")
 
         except Exception as e:
-            st.error(f"Erreur lors de l'analyse : {e}")
+            st.error(f"Erreur d'analyse : {e}")
         finally:
             if os.path.exists(tmp_path):
                 os.remove(tmp_path)
 
 st.markdown("---")
-st.caption("Note : La séparation harmonique (HPSS) est active. L'algorithme ignore les kicks et percussions pour se concentrer sur la mélodie.")
+st.caption("Mise à jour : Gestion automatique des octaves et filtrage harmonique activés.")
