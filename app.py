@@ -74,7 +74,7 @@ def analyze_full_audio(file_path):
 st.title("👂 Perception Auditive : Analyse Intégrale")
 st.markdown("Cette version analyse **100% de la durée du morceau** pour une précision maximale.")
 
-uploaded_file = st.file_uploader("Uploadez votre morceau", type=["mp3", "wav"])
+uploaded_file = st.file_uploader("Uploadez votre morceau", type=["mp3", "wav", "flac"])
 
 if uploaded_file is not None:
     with open("temp_audio", "wb") as f:
