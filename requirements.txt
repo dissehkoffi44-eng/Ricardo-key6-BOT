@@ -1,7 +1,6 @@
-streamlit
-librosa
-numpy
+streamlit==1.31.0
+librosa==0.10.1
+numpy==1.26.4
 pandas
 plotly
 matplotlib
-scipy
