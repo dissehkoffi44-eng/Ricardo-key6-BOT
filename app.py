@@ -5,6 +5,7 @@ import plotly.graph_objects as go
 import requests
 import os
 import io
+import time
 
 # --- CONFIGURATION ---
 st.set_page_config(page_title="DJ Ricardo's Pro Ear", layout="wide")
@@ -21,6 +22,14 @@ def get_camelot_key(key, tone):
     }
     return camelot_map.get(f"{key} {tone}", "Inconnu")
 
+def get_scale_notes(key, tone):
+    """Retourne les notes appartenant à la gamme détectée pour marquage sur le radar."""
+    notes = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
+    # Intervalles : Majeur (0,2,4,5,7,9,11) | Mineur (0,2,3,5,7,8,10)
+    intervals = [0, 2, 4, 5, 7, 9, 11] if tone == "Major" else [0, 2, 3, 5, 7, 8, 10]
+    start_idx = notes.index(key)
+    return [notes[(start_idx + i) % 12] for i in intervals]
+
 def send_telegram_data(message, image_bytes=None):
     if not TELEGRAM_TOKEN or not CHAT_ID: return
     base_url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
@@ -33,27 +42,19 @@ def send_telegram_data(message, image_bytes=None):
     except Exception as e:
         st.error(f"Erreur Telegram : {e}")
 
-def analyze_audio_optimized(file_buffer):
-    # 1. Chargement
+def analyze_audio_optimized(file_buffer, progress_bar):
+    # Simulation de progression pour l'UX
+    progress_bar.progress(10, text="Chargement du fichier...")
     y, sr = librosa.load(file_buffer, sr=22050)
     
-    # 2. CORRECTION DU DÉSACCORDAGE (Auto-Tuning)
-    # On estime le décalage par rapport au 440Hz
+    progress_bar.progress(30, text="Correction du pitch (Auto-Tuning)...")
     tuning = librosa.estimate_tuning(y=y, sr=sr)
     
-    # 3. Pré-emphase
+    progress_bar.progress(50, text="Analyse harmonique (CQT)...")
     y = librosa.effects.preemphasis(y)
+    chroma = librosa.feature.chroma_cqt(y=y, sr=sr, hop_length=512, bins_per_octave=24, tuning=tuning)
     
-    # 4. Extraction CQT avec prise en compte du décalage (tuning)
-    # Le paramètre 'tuning' recale les fréquences sur les bonnes notes
-    chroma = librosa.feature.chroma_cqt(
-        y=y, 
-        sr=sr, 
-        hop_length=512, 
-        bins_per_octave=24, 
-        tuning=tuning
-    )
-    
+    progress_bar.progress(70, text="Calcul de la tonalité...")
     chroma_vals = np.mean(chroma**2, axis=1)
     if np.max(chroma_vals) > 0:
         chroma_vals = chroma_vals / np.max(chroma_vals)
@@ -71,14 +72,19 @@ def analyze_audio_optimized(file_buffer):
         if s_maj > best_score: best_score, key, tone = s_maj, notes[i], "Major"
         if s_min > best_score: best_score, key, tone = s_min, notes[i], "Minor"
 
+    progress_bar.progress(90, text="Finalisation du rapport...")
     sorted_indices = np.argsort(chroma_vals)[::-1]
     top_notes = [(notes[i], round(chroma_vals[i]*100, 1)) for i in sorted_indices[:3]]
+    
+    progress_bar.progress(100, text="Analyse terminée !")
+    time.sleep(0.5)
+    progress_bar.empty()
     
     return chroma_vals, key, tone, top_notes, tuning
 
 # --- INTERFACE ---
 st.title("DJ Ricardo's Pro Ear 🎧")
-st.markdown("Analyse multi-fichiers avec **Auto-Tuning Correction**.")
+st.markdown("Analyse de tonalité professionnelle avec notation **Camelot** et **Auto-Tuning**.")
 
 uploaded_files = st.file_uploader("Glissez vos morceaux ici", type=["mp3", "wav", "flac"], accept_multiple_files=True)
 
@@ -86,39 +92,67 @@ if uploaded_files:
     for f in uploaded_files:
         with st.expander(f"📊 Résultats pour : {f.name}", expanded=True):
             try:
-                chroma_vals, key, tone, top_notes, tuning = analyze_audio_optimized(f)
+                # Barre de progression spécifique à ce fichier
+                progress_text = f"Analyse de {f.name}..."
+                my_bar = st.progress(0, text=progress_text)
+                
+                chroma_vals, key, tone, top_notes, tuning = analyze_audio_optimized(f, my_bar)
                 camelot = get_camelot_key(key, tone)
+                scale_notes = get_scale_notes(key, tone)
                 
                 c1, c2, c3 = st.columns([1, 1, 2])
-                c1.metric("Tonalité", f"{key} {tone}")
+                # Mise à jour des labels pour préciser Majeur/Mineur
+                c1.metric("Tonalité Détectée", f"{key} {tone}")
                 c2.metric("Code Camelot", camelot)
                 
-                # Affichage du décalage détecté
-                tuning_info = f"Décalage détecté : {round(tuning, 2)} cents"
+                tuning_info = f"Pitch Offset : {round(tuning, 2)} cents"
                 note_details = "\n".join([f"• {n}: {p}%" for n, p in top_notes])
-                c3.markdown(f"**Analyse :**\n{tuning_info}\n\n**Dominances :**\n{note_details}")
+                c3.markdown(f"**Analyse :**\n{tuning_info}\n\n**Notes Dominantes :**\n{note_details}")
 
-                # Graphique Radar
+                # --- Graphique Radar Amélioré ---
                 categories = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
-                fig = go.Figure(data=go.Scatterpolar(r=chroma_vals, theta=categories, fill='toself', line_color='#00FFAA'))
-                fig.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 1])), template="plotly_dark", title=f"Empreinte : {f.name}")
+                # On ajoute une étiquette (Scale) aux notes appartenant à la gamme
+                radar_labels = [f"**{n}** (In Scale)" if n in scale_notes else n for n in categories]
+                
+                fig = go.Figure()
+                fig.add_trace(go.Scatterpolar(
+                    r=chroma_vals,
+                    theta=radar_labels,
+                    fill='toself',
+                    name=f"{key} {tone}",
+                    line_color='#00FFAA'
+                ))
+                
+                fig.update_layout(
+                    polar=dict(
+                        radialaxis=dict(visible=True, range=[0, 1]),
+                        angularaxis=dict(tickfont_size=12)
+                    ),
+                    template="plotly_dark",
+                    title=f"Empreinte Harmonique : {f.name} | Clé : {camelot} ({tone})",
+                    margin=dict(l=80, r=80, t=100, b=80)
+                )
                 st.plotly_chart(fig, use_container_width=True)
 
+                # Export Image pour Telegram
                 try:
                     img_bytes = fig.to_image(format="png", width=800, height=600)
                 except:
                     img_bytes = None
 
+                # --- Rapport Telegram avec Camelot ---
                 tg_msg = (
                     f"🎵 *RAPPORT DJ RICARDO*\n\n"
                     f"📄 *Fichier :* `{f.name}`\n"
-                    f"🎼 *Clé :* {key} {tone} ({camelot})\n"
-                    f"📉 *Pitch :* {round(tuning, 2)} cents\n\n"
-                    f"🎹 *Notes dominantes :*\n{note_details}"
+                    f"🎼 *Clé Camelot :* `{camelot}`\n"
+                    f"🎹 *Mode :* {key} {tone}\n"
+                    f"📉 *Pitch Tuning :* {round(tuning, 2)} cents\n\n"
+                    f"🌟 *Notes dans la gamme :* {', '.join(scale_notes)}\n"
+                    f"🚀 *Top Notes :*\n{note_details}"
                 )
                 
                 send_telegram_data(tg_msg, img_bytes)
-                st.success(f"Analyse envoyée pour {f.name}")
+                st.success(f"Analyse envoyée avec succès pour {f.name}")
 
             except Exception as e:
                 st.error(f"Erreur sur {f.name} : {e}")
