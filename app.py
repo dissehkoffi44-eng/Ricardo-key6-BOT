@@ -23,19 +23,17 @@ def get_camelot_key(key, tone):
     return camelot_map.get(f"{key} {tone}", "Inconnu")
 
 def get_scale_notes(key, tone):
-    """Retourne les notes appartenant à la gamme détectée pour marquage sur le radar."""
+    """Retourne les notes appartenant à la gamme détectée."""
     notes = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
-    # Intervalles : Majeur (0,2,4,5,7,9,11) | Mineur (0,2,3,5,7,8,10)
     intervals = [0, 2, 4, 5, 7, 9, 11] if tone == "Major" else [0, 2, 3, 5, 7, 8, 10]
     start_idx = notes.index(key)
     return [notes[(start_idx + i) % 12] for i in intervals]
 
-def generate_piano_chord(key, tone, duration=3.0):
-    """Génère un accord riche (Fondamentale, Tierce, Quinte, Octave) pour vérification auditive."""
+def generate_real_piano_chord(key, tone, duration=4.0):
+    """Génère un accord de piano réaliste par synthèse additive harmonique."""
     sr = 22050
     t = np.linspace(0, duration, int(sr * duration), False)
     
-    # Fréquences de base (Octave 3/4)
     notes_freq = {
         'C': 261.63, 'C#': 277.18, 'D': 293.66, 'D#': 311.13, 'E': 329.63, 'F': 349.23,
         'F#': 369.99, 'G': 392.00, 'G#': 415.30, 'A': 440.00, 'A#': 466.16, 'B': 493.88
@@ -44,30 +42,33 @@ def generate_piano_chord(key, tone, duration=3.0):
     notes_list = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
     root_idx = notes_list.index(key)
     
-    # Construction de l'accord (fondamentale, tierce, quinte, octave)
-    if tone == "Major":
-        intervals = [0, 4, 7, 12] # Tierce majeure
-    else:
-        intervals = [0, 3, 7, 12] # Tierce mineure
+    # Structure de l'accord : Fondamentale, Tierce (M/m), Quinte, Octave
+    intervals = [0, 4, 7, 12] if tone == "Major" else [0, 3, 7, 12]
     
     chord_wave = np.zeros_like(t)
-    for i in intervals:
-        freq = notes_freq[notes_list[(root_idx + i) % 12]]
-        if i == 12: freq *= 2 # Octave supérieure
-        
-        # Superposition d'harmoniques pour un son plus riche "piano-like"
-        chord_wave += np.sin(2 * np.pi * freq * t) * 0.4
-        chord_wave += np.sin(2 * np.pi * (freq * 2) * t) * 0.1  # Harmonique 2
-        chord_wave += np.sin(2 * np.pi * (freq * 3) * t) * 0.05 # Harmonique 3
-
-    # Enveloppe ADSR simple pour éviter le clic
-    fade_in = int(0.1 * sr)
-    fade_out = int(0.5 * sr)
-    envelope = np.ones_like(chord_wave)
-    envelope[:fade_in] = np.linspace(0, 1, fade_in)
-    envelope[-fade_out:] = np.linspace(1, 0, fade_out)
     
-    chord_wave = (chord_wave * envelope * 0.3).astype(np.float32)
+    for interval in intervals:
+        freq = notes_freq[notes_list[(root_idx + interval) % 12]]
+        if interval == 12: freq *= 2
+        
+        # Synthèse type Piano : Fondamentale forte + harmoniques décroissantes
+        # Un vrai piano a des harmoniques qui ne sont pas parfaitement multiples (inharmonicité)
+        for h in range(1, 8):
+            amplitude = 1.0 / (h ** 1.5)  # Décroissance du volume des harmoniques
+            # Enveloppe de résonance : Attaque rapide, déclin exponentiel plus long pour les graves
+            decay = np.exp(-t * (1.5 + h * 0.5)) 
+            
+            harmonic_wave = amplitude * np.sin(2 * np.pi * freq * h * t) * decay
+            chord_wave += harmonic_wave
+
+    # Normalisation et ajout d'une enveloppe globale ADSR pour le réalisme
+    attack = int(0.02 * sr)
+    chord_wave[:attack] *= np.linspace(0, 1, attack)
+    
+    # Compression légère pour stabiliser le volume
+    chord_wave = np.tanh(chord_wave) 
+    
+    chord_wave = (chord_wave * 0.5).astype(np.float32)
     return chord_wave, sr
 
 def send_telegram_data(message, image_bytes=None):
@@ -123,7 +124,7 @@ def analyze_audio_optimized(file_buffer, progress_bar):
 
 # --- INTERFACE ---
 st.title("DJ's Ear Pro🎧")
-st.markdown("Analyse de tonalité professionnelle avec notation **Camelot** et **Vérificateur d'Accord Piano**.")
+st.markdown("Analyse de tonalité avec **Vérificateur d'Accord Piano Réel**.")
 
 uploaded_files = st.file_uploader("Glissez vos morceaux ici", type=["mp3", "wav", "flac"], accept_multiple_files=True)
 
@@ -141,15 +142,14 @@ if uploaded_files:
                 c1.metric("Tonalité Détectée", f"{key} {tone}")
                 c2.metric("Code Camelot", camelot)
                 
-                tuning_info = f"Pitch Offset : {round(tuning, 2)} cents"
-                note_details = "\n".join([f"• {n}: {p}%" for n, p in top_notes])
-                
                 with c3:
-                    st.markdown(f"**Analyse :**\n{tuning_info}\n\n**Notes Dominantes :**\n{note_details}")
-                    st.markdown("### 🎹 Vérificateur de note")
-                    chord_wave, sr = generate_piano_chord(key, tone)
-                    st.audio(chord_wave, sample_rate=sr)
-                    st.caption(f"Accord de {key} {tone} (Réel)")
+                    st.markdown("### 🎹 Vérificateur d'accord (Piano)")
+                    # Génération de l'accord piano réel
+                    chord_audio, sr = generate_real_piano_chord(key, tone)
+                    st.audio(chord_audio, sample_rate=sr)
+                    st.caption(f"Accord acoustique de {key} {tone}")
+                    
+                    st.markdown(f"**Notes Dominantes :**\n" + "\n".join([f"• {n}: {p}%" for n, p in top_notes]))
 
                 # --- Graphique Radar ---
                 categories = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
@@ -157,20 +157,14 @@ if uploaded_files:
                 
                 fig = go.Figure()
                 fig.add_trace(go.Scatterpolar(
-                    r=chroma_vals,
-                    theta=radar_labels,
-                    fill='toself',
-                    name=f"{key} {tone}",
-                    line_color='#00FFAA'
+                    r=chroma_vals, theta=radar_labels, fill='toself',
+                    name=f"{key} {tone}", line_color='#00FFAA'
                 ))
                 
                 fig.update_layout(
-                    polar=dict(
-                        radialaxis=dict(visible=True, range=[0, 1]),
-                        angularaxis=dict(tickfont_size=11)
-                    ),
+                    polar=dict(radialaxis=dict(visible=True, range=[0, 1])),
                     template="plotly_dark",
-                    title=f"Empreinte Harmonique : {f.name} | Clé : {camelot} ({tone})",
+                    title=f"Empreinte Harmonique : {f.name} | Clé : {camelot}",
                     margin=dict(l=80, r=80, t=100, b=80)
                 )
                 st.plotly_chart(fig, use_container_width=True)
@@ -187,13 +181,11 @@ if uploaded_files:
                     f"📄 *Fichier :* `{f.name}`\n"
                     f"🎼 *Clé Camelot :* `{camelot}`\n"
                     f"🎹 *Mode :* {key} {tone}\n"
-                    f"📉 *Pitch Tuning :* {round(tuning, 2)} cents\n\n"
-                    f"🌟 *Notes de la gamme ({tone}) :* {', '.join(scale_notes)}\n"
-                    f"🚀 *Top Notes :*\n{note_details}"
+                    f"🌟 *Notes de la gamme :* {', '.join(scale_notes)}"
                 )
                 
                 send_telegram_data(tg_msg, img_bytes)
-                st.success(f"Analyse envoyée avec succès pour {f.name}")
+                st.success(f"Analyse terminée pour {f.name}")
 
             except Exception as e:
                 st.error(f"Erreur sur {f.name} : {e}")
