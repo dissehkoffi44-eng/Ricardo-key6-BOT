@@ -5,11 +5,11 @@ import plotly.graph_objects as go
 import requests
 import os
 import tempfile
+from collections import Counter
 
 # --- CONFIGURATION ---
-st.set_page_config(page_title="DJ Ricardo's Ultimate Ear", layout="wide")
+st.set_page_config(page_title="DJ Ricardo's Ultimate Ear V4", layout="wide")
 
-# Récupération sécurisée des secrets
 TELEGRAM_TOKEN = st.secrets.get("TELEGRAM_TOKEN")
 CHAT_ID = st.secrets.get("CHAT_ID")
 
@@ -32,100 +32,110 @@ def send_telegram_message(message):
             pass
 
 @st.cache_data(show_spinner=False)
-def analyze_pro_ear_v2(file_path):
-    """Analyse de niveau mastering avec correction d'accordage et filtrage harmonique."""
+def analyze_pro_ear_v4(file_path):
     # 1. Chargement du signal
     y, sr = librosa.load(file_path, sr=22050)
-
-    # 2. Correction du Tuning (Gestion du 432Hz vs 440Hz)
-    # On calcule le décalage moyen par rapport au diapason standard
+    
+    # 2. Analyse du Tempo et des Beats (L'oreille rythmique)
+    tempo, beat_frames = librosa.beat.beat_track(y=y, sr=sr)
+    
+    # 3. Correction du Tuning
     tuning = librosa.estimate_tuning(y=y, sr=sr)
     
-    # 3. Séparation Harmonique (HPSS) - On ignore le bruit et les percussions
-    y_harmonic = librosa.effects.hpss(y)[0]
+    # 4. Isolation Harmonique (On retire les drums pour ne pas polluer les notes)
+    y_harmonic = librosa.effects.hpss(y, margin=3.0)[0]
 
-    # 4. Extraction du Chroma CQT avec compensation du tuning
-    # On utilise une haute résolution (36 bins) pour plus de finesse
-    chroma_cqt = librosa.feature.chroma_cqt(
-        y=y_harmonic, 
-        sr=sr, 
-        tuning=tuning, 
-        bins_per_octave=36,
-        n_chroma=12
-    )
+    # 5. Chroma CQT Synchronisé sur les Beats
+    # Au lieu d'analyser chaque milliseconde, on analyse la couleur sonore à chaque "temps"
+    chroma_cqt = librosa.feature.chroma_cqt(y=y_harmonic, sr=sr, tuning=tuning)
     
-    # 5. Lissage par médiane temporelle
-    # Élimine les notes "accidentelles" rapides qui ne définissent pas la clé
-    chroma_vals = np.median(chroma_cqt, axis=1)
-    
-    if np.max(chroma_vals) > 0:
-        chroma_vals = chroma_vals / np.max(chroma_vals)
+    # Synchronisation : On fait la moyenne du chroma entre chaque beat détecté
+    chroma_sync = librosa.util.sync(chroma_cqt, beat_frames, aggregate=np.median)
 
-    # 6. Profils de Temperley (Le standard pour la musique moderne)
+    # 6. Analyse par segments de 32 temps (environ 8 mesures)
+    window_size = 32
+    keys_detected = []
+    
     maj_profile = [5.0, 2.0, 3.5, 2.0, 4.5, 4.0, 2.0, 4.5, 2.0, 3.5, 1.5, 4.0]
     min_profile = [5.0, 2.0, 3.5, 4.5, 2.0, 4.0, 2.0, 4.5, 3.5, 2.0, 1.5, 4.0]
     notes = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
-    
-    best_score = -1
-    final_key, final_tone = "", ""
 
-    for i in range(12):
-        p_maj, p_min = np.roll(maj_profile, i), np.roll(min_profile, i)
-        score_maj = np.corrcoef(chroma_vals, p_maj)[0, 1]
-        score_min = np.corrcoef(chroma_vals, p_min)[0, 1]
+    for i in range(0, chroma_sync.shape[1], window_size):
+        segment = chroma_sync[:, i:i+window_size]
+        if segment.shape[1] < 4: continue
         
-        if score_maj > best_score:
-            best_score, final_key, final_tone = score_maj, notes[i], "Major"
-        if score_min > best_score:
-            best_score, final_key, final_tone = score_min, notes[i], "Minor"
+        chroma_vals = np.mean(segment, axis=1)
+        
+        best_segment_score = -1
+        current_key, current_tone = "", ""
+        
+        for n in range(12):
+            p_maj, p_min = np.roll(maj_profile, n), np.roll(min_profile, n)
+            score_maj = np.corrcoef(chroma_vals, p_maj)[0, 1]
+            score_min = np.corrcoef(chroma_vals, p_min)[0, 1]
+            
+            if score_maj > best_segment_score:
+                best_segment_score, current_key, current_tone = score_maj, notes[n], "Major"
+            if score_min > best_segment_score:
+                best_segment_score, current_key, current_tone = score_min, notes[n], "Minor"
+        
+        keys_detected.append((current_key, current_tone))
 
-    return chroma_vals, final_key, final_tone, tuning
+    # Vote final
+    most_common = Counter(keys_detected).most_common(1)[0][0]
+    final_key, final_tone = most_common
+    
+    # Chroma global pour affichage
+    global_chroma = np.median(chroma_sync, axis=1)
+    if np.max(global_chroma) > 0: global_chroma /= np.max(global_chroma)
+
+    return global_chroma, final_key, final_tone, tuning, tempo, keys_detected
 
 # --- INTERFACE ---
-st.title("DJ Ricardo's Ultimate Ear 💎")
-st.markdown("Version 2.0 : Correction de pitch (Tuning) + Isolation Harmonique (HPSS).")
+st.title("DJ Ricardo's Ultimate Ear 💎 V4")
+st.subheader("Analyse Synchronisée sur le Rythme (Beat-Matching Analysis)")
 
-uploaded_file = st.file_uploader("Glissez un morceau (MP3, WAV, FLAC)", type=["mp3", "wav", "flac"])
+uploaded_file = st.file_uploader("Glissez un morceau", type=["mp3", "wav", "flac"])
 
 if uploaded_file:
     with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(uploaded_file.name)[1]) as tmp_file:
         tmp_file.write(uploaded_file.getbuffer())
         tmp_path = tmp_file.name
 
-    with st.spinner("Analyse chirurgicale de la tonalité..."):
+    with st.spinner("Analyse du BPM et de la structure harmonique..."):
         try:
-            chroma_vals, key, tone, tuning_val = analyze_pro_ear_v2(tmp_path)
+            chroma_vals, key, tone, tuning_val, tempo, history = analyze_pro_ear_v4(tmp_path)
             camelot = get_camelot_key(key, tone)
-            result_text = f"{key} {tone}"
 
-            # Métriques
-            col1, col2, col3 = st.columns(3)
-            col1.metric("Tonalité Détectée", result_text)
-            col2.metric("Code Camelot", camelot)
-            # Affichage de l'écart d'accordage (plus proche de 0 = parfait 440Hz)
-            col3.metric("Décalage Tuning", f"{tuning_val:+.2f} cents")
+            # Métriques Principales
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Tonalité", f"{key} {tone}")
+            c2.metric("Camelot", camelot)
+            c3.metric("Tempo (BPM)", f"{int(tempo)}")
+            c4.metric("Tuning", f"{tuning_val:+.2f}c")
+
+            # Timeline
+            st.write("### ⏱ Évolution de la structure")
+            timeline_str = " ➔ ".join([f"[{k}{'m' if t=='Minor' else ''}]" for k, t in history])
+            st.info(timeline_str)
 
             # Radar Chart
-            categories = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
+            notes_labels = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
             fig = go.Figure(data=go.Scatterpolar(
-                r=chroma_vals, theta=categories, fill='toself', 
-                line_color='#00E676', marker=dict(size=8)
+                r=chroma_vals, theta=notes_labels, fill='toself', line_color='#00E676'
             ))
-            fig.update_layout(
-                polar=dict(radialaxis=dict(visible=True, range=[0, 1])),
-                template="plotly_dark",
-                title="Signature Harmonique"
-            )
+            fig.update_layout(polar=dict(radialaxis=dict(visible=False)), template="plotly_dark")
             st.plotly_chart(fig, use_container_width=True)
 
             # Envoi Telegram
-            send_telegram_message(f"🎼 *Expert Analysis*\n*Track:* {uploaded_file.name}\n*Key:* {result_text}\n*Camelot:* {camelot}\n*Tuning:* {tuning_val:.2f}c")
-            st.success("Analyse terminée. Résultat envoyé sur Telegram.")
+            msg = (f"🎼 *V4 Advanced Analysis*\n"
+                   f"*Track:* {uploaded_file.name}\n"
+                   f"*Key:* {key} {tone} ({camelot})\n"
+                   f"*BPM:* {int(tempo)}\n"
+                   f"*Tuning:* {tuning_val:.2f}c")
+            send_telegram_message(msg)
 
         except Exception as e:
-            st.error(f"Erreur d'analyse : {e}")
+            st.error(f"Erreur : {e}")
         finally:
-            if os.path.exists(tmp_path):
-                os.remove(tmp_path)
-else:
-    st.info("Prêt pour l'analyse. Importez un fichier pour tester la précision.")
+            if os.path.exists(tmp_path): os.remove(tmp_path)
