@@ -90,8 +90,8 @@ def analyze_full_engine(file_bytes, file_name):
     tuning = librosa.estimate_tuning(y=y, sr=sr)
     y_filt = apply_filters(y, sr)
     
-    # Analyse segmentée pour modulation
-    step = 6 # Segments plus courts pour détecter les changements rapides
+    # Analyse segmentée
+    step = 6 
     timeline = []
     votes = Counter()
     
@@ -106,10 +106,22 @@ def analyze_full_engine(file_bytes, file_name):
         votes[result['key']] += int(result['score'] * 100)
         timeline.append({"Temps": start, "Note": result['key'], "Conf": result['score']})
 
-    # Analyse de modulation
-    unique_keys = [t['Note'] for t in timeline]
-    modulation_detected = len(set(unique_keys)) > 2 # Seuil de changement
-    main_key = votes.most_common(1)[0][0]
+    # Détection de la tonalité principale et de la modulation
+    most_common = votes.most_common(2)
+    main_key = most_common[0][0]
+    
+    target_key = None
+    modulation_detected = False
+    
+    # Si on a une deuxième tonalité qui représente une part significative (>30% du score de la principale)
+    if len(most_common) > 1:
+        second_key = most_common[1][0]
+        # On vérifie si cette clé apparaît de manière consistante dans la timeline
+        unique_keys_in_flow = [t['Note'] for t in timeline]
+        if unique_keys_in_flow.count(second_key) > (len(timeline) * 0.15):
+            modulation_detected = True
+            target_key = second_key
+
     avg_conf = int(np.mean([t['Conf'] for t in timeline if t['Note'] == main_key]) * 100)
     
     # Tempo & Chromagramme global
@@ -121,7 +133,10 @@ def analyze_full_engine(file_bytes, file_name):
         "conf": avg_conf, "tempo": int(float(tempo)),
         "tuning": round(440 * (2**(tuning/12)), 1),
         "timeline": timeline, "chroma": full_chroma,
-        "modulation": modulation_detected, "name": file_name
+        "modulation": modulation_detected, 
+        "target_key": target_key,
+        "target_camelot": CAMELOT_MAP.get(target_key, "??") if target_key else None,
+        "name": file_name
     }
     
     del y, y_filt
@@ -131,7 +146,7 @@ def analyze_full_engine(file_bytes, file_name):
 # --- INTERFACE UTILISATEUR ---
 
 st.title("🎧 ABSOLUTE KEY DETECTOR V4")
-st.subheader("Moteur Hybride : Perception Humaine + Multi-Profils + Détection de Modulation")
+st.subheader("Moteur Hybride : Détection de Modulation de Précision")
 
 uploaded_files = st.file_uploader("📂 Glissez vos fichiers audio ici", type=['mp3','wav','flac'], accept_multiple_files=True)
 
@@ -144,12 +159,21 @@ if uploaded_files:
             # Affichage Principal
             bg_color = "linear-gradient(135deg, #1e1b4b, #312e81)" if not data['modulation'] else "linear-gradient(135deg, #1e1b4b, #450a0a)"
             
+            modulation_html = ""
+            if data['modulation']:
+                modulation_html = f"""
+                <div class='modulation-alert'>
+                    ⚠️ MODULATION DÉTECTÉE <br>
+                    <span style='font-size:1.2em;'>Vers : {data['target_key'].upper()} ({data['target_camelot']})</span>
+                </div>
+                """
+
             st.markdown(f"""
                 <div class="report-card" style="background:{bg_color};">
-                    <p style="text-transform:uppercase; letter-spacing:2px; opacity:0.7;">Tonalité Principale</p>
+                    <p style="text-transform:uppercase; letter-spacing:2px; opacity:0.7;">Tonalité Dominante</p>
                     <h1 style="font-size:6em; margin:10px 0;">{data['key'].upper()}</h1>
                     <p style="font-size:1.8em;">CAMELOT : <b>{data['camelot']}</b> | CONFIANCE : <b>{data['conf']}%</b></p>
-                    {"<div class='modulation-alert'>⚠️ MODULATION DÉTECTÉE : Le morceau change de tonalité !</div>" if data['modulation'] else ""}
+                    {modulation_html}
                 </div>
             """, unsafe_allow_html=True)
 
@@ -162,16 +186,16 @@ if uploaded_files:
             with m2:
                 st.markdown(f"<div class='metric-box'><b>ACCORDAGE (REF)</b><br><span style='font-size:1.8em;'>{data['tuning']} Hz</span></div>", unsafe_allow_html=True)
             with m3:
-                # Oscillateur intelligent
-                n, m = data['key'].split()
-                uid = f.name.replace(".","")
+                # Oscillateur
+                n, mode = data['key'].split()
+                uid = f.name.replace(".","").replace(" ","")
                 components.html(f"""
                     <button id="btn_{uid}" style="width:100%; height:65px; background:linear-gradient(90deg, #4F46E5, #7C3AED); color:white; border:none; border-radius:12px; cursor:pointer; font-weight:bold; font-size:1.1em; box-shadow:0 4px 15px rgba(0,0,0,0.3);">🔊 TESTER L'ACCORD</button>
                     <script>
                     document.getElementById('btn_{uid}').onclick = function() {{
                         const ctx = new (window.AudioContext || window.webkitAudioContext)();
                         const freqs = {{'C':261.6,'C#':277.2,'D':293.7,'D#':311.1,'E':329.6,'F':349.2,'F#':370.0,'G':392.0,'G#':415.3,'A':440.0,'A#':466.2,'B':493.9}};
-                        const intervals = '{m}' === 'minor' ? [0, 3, 7, 12] : [0, 4, 7, 12];
+                        const intervals = '{mode}' === 'minor' ? [0, 3, 7, 12] : [0, 4, 7, 12];
                         intervals.forEach((step, i) => {{
                             const o = ctx.createOscillator(); const g = ctx.createGain();
                             o.type = 'triangle';
@@ -188,7 +212,7 @@ if uploaded_files:
             # Visualisations
             c_left, c_right = st.columns([2, 1])
             with c_left:
-                st.markdown("#### 📈 Stabilité et Modulations")
+                st.markdown("#### 📈 Stabilité et Courbe de Modulation")
                 df_tl = pd.DataFrame(data['timeline'])
                 fig_line = px.line(df_tl, x="Temps", y="Note", markers=True, template="plotly_dark", 
                                    category_orders={"Note": NOTES_ORDER}, color_discrete_sequence=['#818cf8'])
@@ -201,16 +225,16 @@ if uploaded_files:
                 fig_radar.update_layout(template="plotly_dark", polar=dict(radialaxis=dict(visible=False)), margin=dict(l=30,r=30,t=30,b=30), height=300)
                 st.plotly_chart(fig_radar, use_container_width=True)
 
-            # Envoi Telegram (Arrière-plan)
+            # Envoi Telegram
             if TELEGRAM_TOKEN and CHAT_ID:
                 try:
-                    mod_txt = "⚠️ Modulation détectée !" if data['modulation'] else "✅ Stable"
+                    mod_txt = f"⚠️ Modulation vers {data['target_key']}" if data['modulation'] else "✅ Stable"
                     msg = (f"🎹 *RAPPORT ABSOLUTE V4*\n"
                            f"📂 `{data['name']}`\n\n"
                            f"*Tonalité:* `{data['key']}`\n"
                            f"*Camelot:* `{data['camelot']}`\n"
-                           f"*Confiance:* `{data['conf']}%`\n"
                            f"*Stabilité:* {mod_txt}\n"
+                           f"*Confiance:* `{data['conf']}%`\n"
                            f"*Tempo:* `{data['tempo']} BPM`")
                     requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
                                   json={"chat_id": CHAT_ID, "text": msg, "parse_mode": "Markdown"})
