@@ -8,7 +8,7 @@ import io
 import time
 
 # --- CONFIGURATION ---
-st.set_page_config(page_title="DJ Ricardo's Pro Ear", layout="wide")
+st.set_page_config(page_title="DJ's Ear Pro", layout="wide")
 
 TELEGRAM_TOKEN = st.secrets.get("TELEGRAM_TOKEN")
 CHAT_ID = st.secrets.get("CHAT_ID")
@@ -83,7 +83,7 @@ def analyze_audio_optimized(file_buffer, progress_bar):
     return chroma_vals, key, tone, top_notes, tuning
 
 # --- INTERFACE ---
-st.title("DJ Ricardo's Pro Ear 🎧")
+st.title("DJ's Ear Pro🎧")
 st.markdown("Analyse de tonalité professionnelle avec notation **Camelot** et **Auto-Tuning**.")
 
 uploaded_files = st.file_uploader("Glissez vos morceaux ici", type=["mp3", "wav", "flac"], accept_multiple_files=True)
@@ -143,7 +143,7 @@ if uploaded_files:
 
                 # --- Rapport Telegram ---
                 tg_msg = (
-                    f"🎵 *RAPPORT DJ RICARDO*\n\n"
+                    f"🎵 *DJ's Ear Pro*\n\n"
                     f"📄 *Fichier :* `{f.name}`\n"
                     f"🎼 *Clé Camelot :* `{camelot}`\n"
                     f"🎹 *Mode :* {key} {tone}\n"
