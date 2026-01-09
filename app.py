@@ -11,13 +11,13 @@ import gc
 import streamlit.components.v1 as components
 from scipy.signal import butter, lfilter
 
-# --- CONFIGURATION ---
-st.set_page_config(page_title="Ultra Key Detector PRO", page_icon="🎹", layout="wide")
+# --- CONFIGURATION SYSTÈME ---
+st.set_page_config(page_title="Absolute Key Detector V4", page_icon="🎼", layout="wide")
 
 TELEGRAM_TOKEN = st.secrets.get("TELEGRAM_TOKEN")
 CHAT_ID = st.secrets.get("CHAT_ID")
 
-# --- CONSTANTES & PROFILS ---
+# --- RÉFÉRENTIELS HARMONIQUES ---
 NOTES_LIST = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
 NOTES_ORDER = [f"{n} {m}" for n in NOTES_LIST for m in ['major', 'minor']]
 
@@ -44,29 +44,32 @@ st.markdown("""
     <style>
     .main { background-color: #0e1117; }
     .report-card { 
-        background: linear-gradient(135deg, #1e3a8a, #581c87); 
-        padding: 40px; border-radius: 20px; text-align: center; color: white; margin-bottom: 20px;
+        background: linear-gradient(135deg, #0f172a, #1e1b4b); 
+        padding: 40px; border-radius: 25px; text-align: center; color: white; 
+        border: 1px solid rgba(255,255,255,0.1); box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+    }
+    .modulation-alert {
+        background: rgba(239, 68, 68, 0.1); color: #f87171;
+        padding: 10px; border-radius: 10px; border: 1px solid #ef4444;
+        margin-top: 15px; font-weight: bold;
     }
     .metric-box {
-        background: #1a1c24; border-radius: 12px; padding: 15px; text-align: center; border: 1px solid #333;
+        background: #1a1c24; border-radius: 15px; padding: 15px; text-align: center; border: 1px solid #333;
     }
     </style>
     """, unsafe_allow_html=True)
 
-# --- MOTEUR AUDIO ---
+# --- FONCTIONS DE TRAITEMENT ---
 
 def apply_filters(y, sr):
-    """Combine Pré-emphase (C1) et Butterworth (C2)."""
     y = librosa.effects.preemphasis(y)
     nyq = 0.5 * sr
-    b, a = butter(4, [100/nyq, 5000/nyq], btype='band')
+    b, a = butter(4, [80/nyq, 6000/nyq], btype='band')
     return lfilter(b, a, y)
 
 def solve_key(chroma_vector):
-    """Trouve la meilleure tonalité selon plusieurs profils."""
     best_score = -1
-    res = {"key": "", "score": 0}
-    # Normalisation
+    res = {"key": "Inconnu", "score": 0}
     cv = (chroma_vector - chroma_vector.min()) / (chroma_vector.max() - chroma_vector.min() + 1e-6)
     
     for p_name, p_data in PROFILES.items():
@@ -78,19 +81,17 @@ def solve_key(chroma_vector):
                     res = {"key": f"{NOTES_LIST[i]} {mode}", "score": score}
     return res
 
-# --- ANALYSE ---
-
 @st.cache_data(show_spinner=False)
-def analyze_absolute(file_bytes, file_name):
+def analyze_full_engine(file_bytes, file_name):
     with io.BytesIO(file_bytes) as b:
-        y, sr = librosa.load(b, sr=22050)
+        y, sr = librosa.load(b, sr=22050, mono=True)
     
     duration = librosa.get_duration(y=y, sr=sr)
     tuning = librosa.estimate_tuning(y=y, sr=sr)
     y_filt = apply_filters(y, sr)
     
-    # Analyse par segments (Stabilité)
-    step = 8
+    # Analyse segmentée pour modulation
+    step = 6 # Segments plus courts pour détecter les changements rapides
     timeline = []
     votes = Counter()
     
@@ -98,103 +99,125 @@ def analyze_absolute(file_bytes, file_name):
         seg = y_filt[int(start*sr):int((start+step)*sr)]
         if np.max(np.abs(seg)) < 0.02: continue
         
-        # CQT Chroma amélioré
-        chroma = librosa.feature.chroma_cqt(y=seg, sr=sr, tuning=tuning, bins_per_octave=24)
+        chroma = librosa.feature.chroma_cqt(y=seg, sr=sr, tuning=tuning, bins_per_octave=36)
         chroma_avg = np.mean(chroma**2, axis=1)
         
         result = solve_key(chroma_avg)
         votes[result['key']] += int(result['score'] * 100)
         timeline.append({"Temps": start, "Note": result['key'], "Conf": result['score']})
 
-    final_key = votes.most_common(1)[0][0]
-    avg_conf = int(np.mean([t['Conf'] for t in timeline if t['Note'] == final_key]) * 100)
+    # Analyse de modulation
+    unique_keys = [t['Note'] for t in timeline]
+    modulation_detected = len(set(unique_keys)) > 2 # Seuil de changement
+    main_key = votes.most_common(1)[0][0]
+    avg_conf = int(np.mean([t['Conf'] for t in timeline if t['Note'] == main_key]) * 100)
     
-    # Global Chroma pour Radar
-    global_chroma = np.mean(librosa.feature.chroma_cqt(y=y_filt, sr=sr, tuning=tuning), axis=1)
-    
-    # Tempo
+    # Tempo & Chromagramme global
     tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
+    full_chroma = np.mean(librosa.feature.chroma_cqt(y=y_filt, sr=sr, tuning=tuning), axis=1)
     
-    return {
-        "key": final_key,
-        "camelot": CAMELOT_MAP.get(final_key, "??"),
-        "conf": avg_conf,
-        "tempo": int(float(tempo)),
+    output = {
+        "key": main_key, "camelot": CAMELOT_MAP.get(main_key, "??"),
+        "conf": avg_conf, "tempo": int(float(tempo)),
         "tuning": round(440 * (2**(tuning/12)), 1),
-        "timeline": timeline,
-        "chroma": global_chroma,
-        "name": file_name
+        "timeline": timeline, "chroma": full_chroma,
+        "modulation": modulation_detected, "name": file_name
     }
-
-# --- UI INTERFACE ---
-st.title("🎧 Ultra Key Detector PRO")
-st.write("Fusion des moteurs RCDJ228 M3 & Musical Ear")
-
-uploaded_file = st.file_uploader("Déposez un fichier audio", type=['mp3','wav','flac'])
-
-if uploaded_file:
-    file_bytes = uploaded_file.read()
     
-    with st.spinner("Analyse spectrale en cours..."):
-        data = analyze_absolute(file_bytes, uploaded_file.name)
+    del y, y_filt
+    gc.collect()
+    return output
+
+# --- INTERFACE UTILISATEUR ---
+
+st.title("🎧 ABSOLUTE KEY DETECTOR V4")
+st.subheader("Moteur Hybride : Perception Humaine + Multi-Profils + Détection de Modulation")
+
+uploaded_files = st.file_uploader("📂 Glissez vos fichiers audio ici", type=['mp3','wav','flac'], accept_multiple_files=True)
+
+if uploaded_files:
+    for f in uploaded_files:
+        with st.spinner(f"Analyse de {f.name}..."):
+            data = analyze_full_engine(f.read(), f.name)
         
-    # --- AFFICHAGE RÉSULTAT ---
-    st.markdown(f"""
-        <div class="report-card">
-            <h3 style="opacity:0.7;">TONALITÉ DÉTECTÉE</h3>
-            <h1 style="font-size:5em; margin:0;">{data['key'].upper()}</h1>
-            <p style="font-size:1.5em;">CAMELOT: <b>{data['camelot']}</b> | CONFIANCE: <b>{data['conf']}%</b></p>
-        </div>
-    """, unsafe_allow_html=True)
-    
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.markdown(f"<div class='metric-box'><b>TEMPO</b><br><span style='font-size:1.5em;'>{data['tempo']} BPM</span></div>", unsafe_allow_html=True)
-    with col2:
-        st.markdown(f"<div class='metric-box'><b>ACCORDAGE</b><br><span style='font-size:1.5em;'>{data['tuning']} Hz</span></div>", unsafe_allow_html=True)
-    with col3:
-        # Mini Oscillateur de test
-        n, m = data['key'].split()
-        js_id = "test_audio"
-        components.html(f"""
-            <button id="{js_id}" style="width:100%; height:55px; background:#6366F1; color:white; border:none; border-radius:10px; cursor:pointer; font-weight:bold;">🔊 TESTER L'ACCORD</button>
-            <script>
-            document.getElementById('{js_id}').onclick = function() {{
-                const ctx = new (window.AudioContext || window.webkitAudioContext)();
-                const freqs = {{'C':261.6,'C#':277.2,'D':293.7,'D#':311.1,'E':329.6,'F':349.2,'F#':370.0,'G':392.0,'G#':415.3,'A':440.0,'A#':466.2,'B':493.9}};
-                const intervals = '{m}' === 'minor' ? [0, 3, 7] : [0, 4, 7];
-                intervals.forEach(i => {{
-                    const o = ctx.createOscillator(); const g = ctx.createGain();
-                    o.frequency.value = freqs['{n}'] * Math.pow(2, i/12);
-                    g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 1.5);
-                    o.connect(g); g.connect(ctx.destination);
-                    o.start(); o.stop(ctx.currentTime + 1.5);
-                }});
-            }}
-            </script>""", height=70)
+        with st.expander(f"📊 RÉSULTATS : {data['name']}", expanded=True):
+            # Affichage Principal
+            bg_color = "linear-gradient(135deg, #1e1b4b, #312e81)" if not data['modulation'] else "linear-gradient(135deg, #1e1b4b, #450a0a)"
+            
+            st.markdown(f"""
+                <div class="report-card" style="background:{bg_color};">
+                    <p style="text-transform:uppercase; letter-spacing:2px; opacity:0.7;">Tonalité Principale</p>
+                    <h1 style="font-size:6em; margin:10px 0;">{data['key'].upper()}</h1>
+                    <p style="font-size:1.8em;">CAMELOT : <b>{data['camelot']}</b> | CONFIANCE : <b>{data['conf']}%</b></p>
+                    {"<div class='modulation-alert'>⚠️ MODULATION DÉTECTÉE : Le morceau change de tonalité !</div>" if data['modulation'] else ""}
+                </div>
+            """, unsafe_allow_html=True)
 
-    # --- GRAPHES ---
-    c_left, c_right = st.columns(2)
-    
-    with c_left:
-        st.subheader("📈 Stabilité Temporelle")
-        df_tl = pd.DataFrame(data['timeline'])
-        fig_line = px.line(df_tl, x="Temps", y="Note", markers=True, template="plotly_dark", category_orders={"Note": NOTES_ORDER})
-        st.plotly_chart(fig_line, use_container_width=True)
-        
-    with c_right:
-        st.subheader("🌀 Empreinte Harmonique")
-        fig_radar = go.Figure(data=go.Scatterpolar(r=data['chroma'], theta=NOTES_LIST, fill='toself', line_color='#00FFAA'))
-        fig_radar.update_layout(template="plotly_dark", polar=dict(radialaxis=dict(visible=False)))
-        st.plotly_chart(fig_radar, use_container_width=True)
+            st.write("---")
+            
+            # Métriques
+            m1, m2, m3 = st.columns(3)
+            with m1:
+                st.markdown(f"<div class='metric-box'><b>TEMPO</b><br><span style='font-size:1.8em;'>{data['tempo']} BPM</span></div>", unsafe_allow_html=True)
+            with m2:
+                st.markdown(f"<div class='metric-box'><b>ACCORDAGE (REF)</b><br><span style='font-size:1.8em;'>{data['tuning']} Hz</span></div>", unsafe_allow_html=True)
+            with m3:
+                # Oscillateur intelligent
+                n, m = data['key'].split()
+                uid = f.name.replace(".","")
+                components.html(f"""
+                    <button id="btn_{uid}" style="width:100%; height:65px; background:linear-gradient(90deg, #4F46E5, #7C3AED); color:white; border:none; border-radius:12px; cursor:pointer; font-weight:bold; font-size:1.1em; box-shadow:0 4px 15px rgba(0,0,0,0.3);">🔊 TESTER L'ACCORD</button>
+                    <script>
+                    document.getElementById('btn_{uid}').onclick = function() {{
+                        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                        const freqs = {{'C':261.6,'C#':277.2,'D':293.7,'D#':311.1,'E':329.6,'F':349.2,'F#':370.0,'G':392.0,'G#':415.3,'A':440.0,'A#':466.2,'B':493.9}};
+                        const intervals = '{m}' === 'minor' ? [0, 3, 7, 12] : [0, 4, 7, 12];
+                        intervals.forEach((step, i) => {{
+                            const o = ctx.createOscillator(); const g = ctx.createGain();
+                            o.type = 'triangle';
+                            o.frequency.setValueAtTime(freqs['{n}'] * Math.pow(2, step/12), ctx.currentTime);
+                            g.gain.setValueAtTime(0, ctx.currentTime);
+                            g.gain.linearRampToValueAtTime(0.2, ctx.currentTime + 0.1);
+                            g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 2.0);
+                            o.connect(g); g.connect(ctx.destination);
+                            o.start(); o.stop(ctx.currentTime + 2.0);
+                        }});
+                    }}
+                    </script>""", height=85)
 
-    # --- TELEGRAM ---
-    if TELEGRAM_TOKEN and CHAT_ID:
-        try:
-            msg = f"🎹 *ANALYSE ABSOLUE*\n📂 `{data['name']}`\n\n*Résultat:* {data['key']}\n*Camelot:* {data['camelot']}\n*Confiance:* {data['conf']}%\n*Tempo:* {data['tempo']} BPM"
-            requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", json={"chat_id": CHAT_ID, "text": msg, "parse_mode": "Markdown"})
-        except:
-            pass
+            # Visualisations
+            c_left, c_right = st.columns([2, 1])
+            with c_left:
+                st.markdown("#### 📈 Stabilité et Modulations")
+                df_tl = pd.DataFrame(data['timeline'])
+                fig_line = px.line(df_tl, x="Temps", y="Note", markers=True, template="plotly_dark", 
+                                   category_orders={"Note": NOTES_ORDER}, color_discrete_sequence=['#818cf8'])
+                fig_line.update_layout(margin=dict(l=0,r=0,t=0,b=0), height=300)
+                st.plotly_chart(fig_line, use_container_width=True)
+                
+            with c_right:
+                st.markdown("#### 🌀 Profil Harmonique")
+                fig_radar = go.Figure(data=go.Scatterpolar(r=data['chroma'], theta=NOTES_LIST, fill='toself', line_color='#818cf8'))
+                fig_radar.update_layout(template="plotly_dark", polar=dict(radialaxis=dict(visible=False)), margin=dict(l=30,r=30,t=30,b=30), height=300)
+                st.plotly_chart(fig_radar, use_container_width=True)
 
+            # Envoi Telegram (Arrière-plan)
+            if TELEGRAM_TOKEN and CHAT_ID:
+                try:
+                    mod_txt = "⚠️ Modulation détectée !" if data['modulation'] else "✅ Stable"
+                    msg = (f"🎹 *RAPPORT ABSOLUTE V4*\n"
+                           f"📂 `{data['name']}`\n\n"
+                           f"*Tonalité:* `{data['key']}`\n"
+                           f"*Camelot:* `{data['camelot']}`\n"
+                           f"*Confiance:* `{data['conf']}%`\n"
+                           f"*Stabilité:* {mod_txt}\n"
+                           f"*Tempo:* `{data['tempo']} BPM`")
+                    requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
+                                  json={"chat_id": CHAT_ID, "text": msg, "parse_mode": "Markdown"})
+                except: pass
+
+    if st.sidebar.button("🧹 Vider le cache mémoire"):
+        st.cache_data.clear()
+        st.rerun()
 else:
-    st.info("Téléchargez un morceau pour lancer l'analyse combinée.")
+    st.info("En attente de fichiers audio pour commencer l'analyse absolue.")
