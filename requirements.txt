@@ -1,8 +1,7 @@
 streamlit
 librosa
 numpy
-pandas
 plotly
-matplotlib
 requests
-soundfile
+pillow
+kaleido
