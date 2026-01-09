@@ -1,6 +1,8 @@
 streamlit
 librosa
 numpy
+pandas
 plotly
 requests
-kaleido==0.1.0.post1
+scipy
+kaleido==0.2.1
