@@ -90,7 +90,6 @@ def analyze_full_engine(file_bytes, file_name):
     tuning = librosa.estimate_tuning(y=y, sr=sr)
     y_filt = apply_filters(y, sr)
     
-    # Analyse segmentée
     step = 6 
     timeline = []
     votes = Counter()
@@ -106,7 +105,6 @@ def analyze_full_engine(file_bytes, file_name):
         votes[result['key']] += int(result['score'] * 100)
         timeline.append({"Temps": start, "Note": result['key'], "Conf": result['score']})
 
-    # Détection de la tonalité principale et de la modulation
     most_common = votes.most_common(2)
     main_key = most_common[0][0]
     
@@ -116,7 +114,6 @@ def analyze_full_engine(file_bytes, file_name):
     if len(most_common) > 1:
         second_key = most_common[1][0]
         unique_keys_in_flow = [t['Note'] for t in timeline]
-        # Seuil de détection de modulation (15% du temps total)
         if unique_keys_in_flow.count(second_key) > (len(timeline) * 0.15):
             modulation_detected = True
             target_key = second_key
@@ -141,24 +138,42 @@ def analyze_full_engine(file_bytes, file_name):
     return output
 
 def get_piano_js(button_id, key_name):
-    """Génère le script JS pour l'oscillateur piano selon la tonalité."""
+    """Génère un son de piano riche (accord) avec distinction majeure/mineure."""
     if not key_name or " " not in key_name:
         return ""
     n, mode = key_name.split()
+    
     return f"""
     document.getElementById('{button_id}').onclick = function() {{
         const ctx = new (window.AudioContext || window.webkitAudioContext)();
         const freqs = {{'C':261.6,'C#':277.2,'D':293.7,'D#':311.1,'E':329.6,'F':349.2,'F#':370.0,'G':392.0,'G#':415.3,'A':440.0,'A#':466.2,'B':493.9}};
-        const intervals = '{mode}' === 'minor' ? [0, 3, 7, 12] : [0, 4, 7, 12];
-        intervals.forEach((step, i) => {{
-            const o = ctx.createOscillator(); const g = ctx.createGain();
-            o.type = 'triangle';
-            o.frequency.setValueAtTime(freqs['{n}'] * Math.pow(2, step/12), ctx.currentTime);
-            g.gain.setValueAtTime(0, ctx.currentTime);
-            g.gain.linearRampToValueAtTime(0.2, ctx.currentTime + 0.1);
-            g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 2.0);
-            o.connect(g); g.connect(ctx.destination);
-            o.start(); o.stop(ctx.currentTime + 2.0);
+        
+        // INTERVALLES : 3 demi-tons pour mineur (0,3,7), 4 pour majeur (0,4,7)
+        const isMinor = '{mode}' === 'minor';
+        const chord = isMinor ? [0, 3, 7, 12] : [0, 4, 7, 12];
+        
+        chord.forEach((interval) => {{
+            const baseFreq = freqs['{n}'] * Math.pow(2, interval/12);
+            
+            // Création de 3 harmoniques par note pour simuler un piano
+            [1, 2, 3].forEach((harmonic, index) => {{
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+                
+                osc.type = index === 0 ? 'triangle' : 'sine';
+                osc.frequency.setValueAtTime(baseFreq * harmonic, ctx.currentTime);
+                
+                // Enveloppe ADSR simplifiée (Piano)
+                gain.gain.setValueAtTime(0, ctx.currentTime);
+                gain.gain.linearRampToValueAtTime(0.15 / harmonic, ctx.currentTime + 0.05);
+                gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 2.5);
+                
+                osc.connect(gain);
+                gain.connect(ctx.destination);
+                
+                osc.start();
+                osc.stop(ctx.currentTime + 2.5);
+            }});
         }});
     }};
     """
@@ -166,7 +181,7 @@ def get_piano_js(button_id, key_name):
 # --- INTERFACE UTILISATEUR ---
 
 st.title("🎧 ABSOLUTE KEY DETECTOR V4")
-st.subheader("Moteur Hybride : Détection de Modulation & Test Harmonique Double")
+st.subheader("Détection de Modulation & Accords de Piano Réels")
 
 uploaded_files = st.file_uploader("📂 Glissez vos fichiers audio ici", type=['mp3','wav','flac'], accept_multiple_files=True)
 
@@ -176,8 +191,7 @@ if uploaded_files:
             data = analyze_full_engine(f.read(), f.name)
         
         with st.expander(f"📊 RÉSULTATS : {data['name']}", expanded=True):
-            # Affichage Principal
-            bg_color = "linear-gradient(135deg, #1e1b4b, #312e81)" if not data['modulation'] else "linear-gradient(135deg, #1e1b4b, #450a0a)"
+            bg_color = "linear-gradient(135deg, #0f172a, #1e3a8a)" if not data['modulation'] else "linear-gradient(135deg, #1e1b4b, #7f1d1d)"
             
             modulation_html = ""
             if data['modulation']:
@@ -199,37 +213,33 @@ if uploaded_files:
 
             st.write("---")
             
-            # Métriques et Boutons Audio
             m1, m2, m3 = st.columns(3)
             with m1:
                 st.markdown(f"<div class='metric-box'><b>TEMPO</b><br><span style='font-size:1.8em;'>{data['tempo']} BPM</span></div>", unsafe_allow_html=True)
                 st.markdown(f"<div class='metric-box' style='margin-top:10px;'><b>ACCORDAGE</b><br><span style='font-size:1.2em;'>{data['tuning']} Hz</span></div>", unsafe_allow_html=True)
             
             with m2:
-                st.markdown("<b>TONALITÉ PRINCIPALE</b>", unsafe_allow_html=True)
+                st.markdown(f"<b>ACCORD {data['key'].upper()}</b>", unsafe_allow_html=True)
                 uid_main = f"btn_main_{f.name.replace('.','').replace(' ','')}"
-                js_main = get_piano_js(uid_main, data['key'])
                 components.html(f"""
-                    <button id="{uid_main}" style="width:100%; height:100px; background:linear-gradient(90deg, #4F46E5, #7C3AED); color:white; border:none; border-radius:15px; cursor:pointer; font-weight:bold; font-size:1.1em; box-shadow:0 4px 15px rgba(0,0,0,0.3);">🔊 TESTER {data['key'].upper()}</button>
-                    <script>{js_main}</script>
+                    <button id="{uid_main}" style="width:100%; height:100px; background:linear-gradient(90deg, #4F46E5, #7C3AED); color:white; border:none; border-radius:15px; cursor:pointer; font-weight:bold; font-size:1.1em; box-shadow:0 4px 15px rgba(0,0,0,0.3);">🎹 JOUER L'ACCORD</button>
+                    <script>{get_piano_js(uid_main, data['key'])}</script>
                 """, height=120)
 
             with m3:
                 if data['modulation']:
-                    st.markdown("<b>TONALITÉ MODULÉE</b>", unsafe_allow_html=True)
+                    st.markdown(f"<b>ACCORD {data['target_key'].upper()}</b>", unsafe_allow_html=True)
                     uid_mod = f"btn_mod_{f.name.replace('.','').replace(' ','')}"
-                    js_mod = get_piano_js(uid_mod, data['target_key'])
                     components.html(f"""
-                        <button id="{uid_mod}" style="width:100%; height:100px; background:linear-gradient(90deg, #ef4444, #991b1b); color:white; border:none; border-radius:15px; cursor:pointer; font-weight:bold; font-size:1.1em; box-shadow:0 4px 15px rgba(0,0,0,0.3);">🔊 TESTER {data['target_key'].upper()}</button>
-                        <script>{js_mod}</script>
+                        <button id="{uid_mod}" style="width:100%; height:100px; background:linear-gradient(90deg, #ef4444, #b91c1c); color:white; border:none; border-radius:15px; cursor:pointer; font-weight:bold; font-size:1.1em; box-shadow:0 4px 15px rgba(0,0,0,0.3);">🎹 JOUER L'ACCORD</button>
+                        <script>{get_piano_js(uid_mod, data['target_key'])}</script>
                     """, height=120)
                 else:
-                    st.markdown("<div style='height:120px; display:flex; align-items:center; justify-content:center; opacity:0.3; border:2px dashed #333; border-radius:15px;'>Aucune Modulation</div>", unsafe_allow_html=True)
+                    st.markdown("<div style='height:120px; display:flex; align-items:center; justify-content:center; opacity:0.3; border:2px dashed #444; border-radius:15px;'>Pas de Modulation</div>", unsafe_allow_html=True)
 
-            # Visualisations
             c_left, c_right = st.columns([2, 1])
             with c_left:
-                st.markdown("#### 📈 Analyse Temporelle (Modulation Flow)")
+                st.markdown("#### 📈 Flux Harmonique")
                 df_tl = pd.DataFrame(data['timeline'])
                 fig_line = px.line(df_tl, x="Temps", y="Note", markers=True, template="plotly_dark", 
                                    category_orders={"Note": NOTES_ORDER}, color_discrete_sequence=['#818cf8'])
@@ -237,21 +247,17 @@ if uploaded_files:
                 st.plotly_chart(fig_line, use_container_width=True)
                 
             with c_right:
-                st.markdown("#### 🌀 Profil Harmonique")
+                st.markdown("#### 🌀 Profil de Fréquences")
                 fig_radar = go.Figure(data=go.Scatterpolar(r=data['chroma'], theta=NOTES_LIST, fill='toself', line_color='#818cf8'))
                 fig_radar.update_layout(template="plotly_dark", polar=dict(radialaxis=dict(visible=False)), margin=dict(l=30,r=30,t=30,b=30), height=350)
                 st.plotly_chart(fig_radar, use_container_width=True)
 
-            # Envoi Telegram
             if TELEGRAM_TOKEN and CHAT_ID:
                 try:
                     mod_txt = f"⚠️ Modulation vers {data['target_key']}" if data['modulation'] else "✅ Stable"
-                    msg = (f"🎹 *RAPPORT ABSOLUTE V4*\n"
-                           f"📂 `{data['name']}`\n\n"
-                           f"*Tonalité:* `{data['key']}`\n"
-                           f"*Camelot:* `{data['camelot']}`\n"
-                           f"*Stabilité:* {mod_txt}\n"
-                           f"*Confiance:* `{data['conf']}%`\n"
+                    msg = (f"🎹 *RAPPORT ABSOLUTE V4*\n📂 `{data['name']}`\n\n"
+                           f"*Tonalité:* `{data['key']}`\n*Camelot:* `{data['camelot']}`\n"
+                           f"*Stabilité:* {mod_txt}\n*Confiance:* `{data['conf']}%`\n"
                            f"*Tempo:* `{data['tempo']} BPM`")
                     requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
                                   json={"chat_id": CHAT_ID, "text": msg, "parse_mode": "Markdown"})
@@ -261,4 +267,4 @@ if uploaded_files:
         st.cache_data.clear()
         st.rerun()
 else:
-    st.info("En attente de fichiers audio pour commencer l'analyse absolue.")
+    st.info("Glissez vos fichiers audio pour commencer l'analyse.")
