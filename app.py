@@ -50,8 +50,8 @@ st.markdown("""
     }
     .modulation-alert {
         background: rgba(239, 68, 68, 0.1); color: #f87171;
-        padding: 10px; border-radius: 10px; border: 1px solid #ef4444;
-        margin-top: 15px; font-weight: bold;
+        padding: 15px; border-radius: 12px; border: 1px solid #ef4444;
+        margin-top: 20px; font-weight: bold; font-size: 1.1em;
     }
     .metric-box {
         background: #1a1c24; border-radius: 15px; padding: 15px; text-align: center; border: 1px solid #333;
@@ -113,18 +113,15 @@ def analyze_full_engine(file_bytes, file_name):
     target_key = None
     modulation_detected = False
     
-    # Si on a une deuxième tonalité qui représente une part significative (>30% du score de la principale)
     if len(most_common) > 1:
         second_key = most_common[1][0]
-        # On vérifie si cette clé apparaît de manière consistante dans la timeline
         unique_keys_in_flow = [t['Note'] for t in timeline]
+        # Seuil de détection de modulation (15% du temps total)
         if unique_keys_in_flow.count(second_key) > (len(timeline) * 0.15):
             modulation_detected = True
             target_key = second_key
 
     avg_conf = int(np.mean([t['Conf'] for t in timeline if t['Note'] == main_key]) * 100)
-    
-    # Tempo & Chromagramme global
     tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
     full_chroma = np.mean(librosa.feature.chroma_cqt(y=y_filt, sr=sr, tuning=tuning), axis=1)
     
@@ -143,10 +140,33 @@ def analyze_full_engine(file_bytes, file_name):
     gc.collect()
     return output
 
+def get_piano_js(button_id, key_name):
+    """Génère le script JS pour l'oscillateur piano selon la tonalité."""
+    if not key_name or " " not in key_name:
+        return ""
+    n, mode = key_name.split()
+    return f"""
+    document.getElementById('{button_id}').onclick = function() {{
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const freqs = {{'C':261.6,'C#':277.2,'D':293.7,'D#':311.1,'E':329.6,'F':349.2,'F#':370.0,'G':392.0,'G#':415.3,'A':440.0,'A#':466.2,'B':493.9}};
+        const intervals = '{mode}' === 'minor' ? [0, 3, 7, 12] : [0, 4, 7, 12];
+        intervals.forEach((step, i) => {{
+            const o = ctx.createOscillator(); const g = ctx.createGain();
+            o.type = 'triangle';
+            o.frequency.setValueAtTime(freqs['{n}'] * Math.pow(2, step/12), ctx.currentTime);
+            g.gain.setValueAtTime(0, ctx.currentTime);
+            g.gain.linearRampToValueAtTime(0.2, ctx.currentTime + 0.1);
+            g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 2.0);
+            o.connect(g); g.connect(ctx.destination);
+            o.start(); o.stop(ctx.currentTime + 2.0);
+        }});
+    }};
+    """
+
 # --- INTERFACE UTILISATEUR ---
 
 st.title("🎧 ABSOLUTE KEY DETECTOR V4")
-st.subheader("Moteur Hybride : Détection de Modulation de Précision")
+st.subheader("Moteur Hybride : Détection de Modulation & Test Harmonique Double")
 
 uploaded_files = st.file_uploader("📂 Glissez vos fichiers audio ici", type=['mp3','wav','flac'], accept_multiple_files=True)
 
@@ -164,7 +184,7 @@ if uploaded_files:
                 modulation_html = f"""
                 <div class='modulation-alert'>
                     ⚠️ MODULATION DÉTECTÉE <br>
-                    <span style='font-size:1.2em;'>Vers : {data['target_key'].upper()} ({data['target_camelot']})</span>
+                    <span style='font-size:1.3em;'>Vers : {data['target_key'].upper()} ({data['target_camelot']})</span>
                 </div>
                 """
 
@@ -179,50 +199,47 @@ if uploaded_files:
 
             st.write("---")
             
-            # Métriques
+            # Métriques et Boutons Audio
             m1, m2, m3 = st.columns(3)
             with m1:
                 st.markdown(f"<div class='metric-box'><b>TEMPO</b><br><span style='font-size:1.8em;'>{data['tempo']} BPM</span></div>", unsafe_allow_html=True)
+                st.markdown(f"<div class='metric-box' style='margin-top:10px;'><b>ACCORDAGE</b><br><span style='font-size:1.2em;'>{data['tuning']} Hz</span></div>", unsafe_allow_html=True)
+            
             with m2:
-                st.markdown(f"<div class='metric-box'><b>ACCORDAGE (REF)</b><br><span style='font-size:1.8em;'>{data['tuning']} Hz</span></div>", unsafe_allow_html=True)
-            with m3:
-                # Oscillateur
-                n, mode = data['key'].split()
-                uid = f.name.replace(".","").replace(" ","")
+                st.markdown("<b>TONALITÉ PRINCIPALE</b>", unsafe_allow_html=True)
+                uid_main = f"btn_main_{f.name.replace('.','').replace(' ','')}"
+                js_main = get_piano_js(uid_main, data['key'])
                 components.html(f"""
-                    <button id="btn_{uid}" style="width:100%; height:65px; background:linear-gradient(90deg, #4F46E5, #7C3AED); color:white; border:none; border-radius:12px; cursor:pointer; font-weight:bold; font-size:1.1em; box-shadow:0 4px 15px rgba(0,0,0,0.3);">🔊 TESTER L'ACCORD</button>
-                    <script>
-                    document.getElementById('btn_{uid}').onclick = function() {{
-                        const ctx = new (window.AudioContext || window.webkitAudioContext)();
-                        const freqs = {{'C':261.6,'C#':277.2,'D':293.7,'D#':311.1,'E':329.6,'F':349.2,'F#':370.0,'G':392.0,'G#':415.3,'A':440.0,'A#':466.2,'B':493.9}};
-                        const intervals = '{mode}' === 'minor' ? [0, 3, 7, 12] : [0, 4, 7, 12];
-                        intervals.forEach((step, i) => {{
-                            const o = ctx.createOscillator(); const g = ctx.createGain();
-                            o.type = 'triangle';
-                            o.frequency.setValueAtTime(freqs['{n}'] * Math.pow(2, step/12), ctx.currentTime);
-                            g.gain.setValueAtTime(0, ctx.currentTime);
-                            g.gain.linearRampToValueAtTime(0.2, ctx.currentTime + 0.1);
-                            g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 2.0);
-                            o.connect(g); g.connect(ctx.destination);
-                            o.start(); o.stop(ctx.currentTime + 2.0);
-                        }});
-                    }}
-                    </script>""", height=85)
+                    <button id="{uid_main}" style="width:100%; height:100px; background:linear-gradient(90deg, #4F46E5, #7C3AED); color:white; border:none; border-radius:15px; cursor:pointer; font-weight:bold; font-size:1.1em; box-shadow:0 4px 15px rgba(0,0,0,0.3);">🔊 TESTER {data['key'].upper()}</button>
+                    <script>{js_main}</script>
+                """, height=120)
+
+            with m3:
+                if data['modulation']:
+                    st.markdown("<b>TONALITÉ MODULÉE</b>", unsafe_allow_html=True)
+                    uid_mod = f"btn_mod_{f.name.replace('.','').replace(' ','')}"
+                    js_mod = get_piano_js(uid_mod, data['target_key'])
+                    components.html(f"""
+                        <button id="{uid_mod}" style="width:100%; height:100px; background:linear-gradient(90deg, #ef4444, #991b1b); color:white; border:none; border-radius:15px; cursor:pointer; font-weight:bold; font-size:1.1em; box-shadow:0 4px 15px rgba(0,0,0,0.3);">🔊 TESTER {data['target_key'].upper()}</button>
+                        <script>{js_mod}</script>
+                    """, height=120)
+                else:
+                    st.markdown("<div style='height:120px; display:flex; align-items:center; justify-content:center; opacity:0.3; border:2px dashed #333; border-radius:15px;'>Aucune Modulation</div>", unsafe_allow_html=True)
 
             # Visualisations
             c_left, c_right = st.columns([2, 1])
             with c_left:
-                st.markdown("#### 📈 Stabilité et Courbe de Modulation")
+                st.markdown("#### 📈 Analyse Temporelle (Modulation Flow)")
                 df_tl = pd.DataFrame(data['timeline'])
                 fig_line = px.line(df_tl, x="Temps", y="Note", markers=True, template="plotly_dark", 
                                    category_orders={"Note": NOTES_ORDER}, color_discrete_sequence=['#818cf8'])
-                fig_line.update_layout(margin=dict(l=0,r=0,t=0,b=0), height=300)
+                fig_line.update_layout(margin=dict(l=0,r=0,t=0,b=0), height=350)
                 st.plotly_chart(fig_line, use_container_width=True)
                 
             with c_right:
                 st.markdown("#### 🌀 Profil Harmonique")
                 fig_radar = go.Figure(data=go.Scatterpolar(r=data['chroma'], theta=NOTES_LIST, fill='toself', line_color='#818cf8'))
-                fig_radar.update_layout(template="plotly_dark", polar=dict(radialaxis=dict(visible=False)), margin=dict(l=30,r=30,t=30,b=30), height=300)
+                fig_radar.update_layout(template="plotly_dark", polar=dict(radialaxis=dict(visible=False)), margin=dict(l=30,r=30,t=30,b=30), height=350)
                 st.plotly_chart(fig_radar, use_container_width=True)
 
             # Envoi Telegram
