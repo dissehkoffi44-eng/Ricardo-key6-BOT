@@ -101,18 +101,19 @@ if uploaded_files:
                 scale_notes = get_scale_notes(key, tone)
                 
                 c1, c2, c3 = st.columns([1, 1, 2])
-                # Mise à jour des labels pour préciser Majeur/Mineur
                 c1.metric("Tonalité Détectée", f"{key} {tone}")
                 c2.metric("Code Camelot", camelot)
                 
                 tuning_info = f"Pitch Offset : {round(tuning, 2)} cents"
+                # Formattage propre des dominances pour le texte
                 note_details = "\n".join([f"• {n}: {p}%" for n, p in top_notes])
                 c3.markdown(f"**Analyse :**\n{tuning_info}\n\n**Notes Dominantes :**\n{note_details}")
 
-                # --- Graphique Radar Amélioré ---
+                # --- Graphique Radar Mis à Jour ---
                 categories = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
-                # On ajoute une étiquette (Scale) aux notes appartenant à la gamme
-                radar_labels = [f"**{n}** (In Scale)" if n in scale_notes else n for n in categories]
+                
+                # ICI : Remplacement de "In Scale" par "Major" ou "Minor" selon le résultat
+                radar_labels = [f"**{n}** ({tone})" if n in scale_notes else n for n in categories]
                 
                 fig = go.Figure()
                 fig.add_trace(go.Scatterpolar(
@@ -126,7 +127,7 @@ if uploaded_files:
                 fig.update_layout(
                     polar=dict(
                         radialaxis=dict(visible=True, range=[0, 1]),
-                        angularaxis=dict(tickfont_size=12)
+                        angularaxis=dict(tickfont_size=11)
                     ),
                     template="plotly_dark",
                     title=f"Empreinte Harmonique : {f.name} | Clé : {camelot} ({tone})",
@@ -140,14 +141,14 @@ if uploaded_files:
                 except:
                     img_bytes = None
 
-                # --- Rapport Telegram avec Camelot ---
+                # --- Rapport Telegram ---
                 tg_msg = (
                     f"🎵 *RAPPORT DJ RICARDO*\n\n"
                     f"📄 *Fichier :* `{f.name}`\n"
                     f"🎼 *Clé Camelot :* `{camelot}`\n"
                     f"🎹 *Mode :* {key} {tone}\n"
                     f"📉 *Pitch Tuning :* {round(tuning, 2)} cents\n\n"
-                    f"🌟 *Notes dans la gamme :* {', '.join(scale_notes)}\n"
+                    f"🌟 *Notes de la gamme ({tone}) :* {', '.join(scale_notes)}\n"
                     f"🚀 *Top Notes :*\n{note_details}"
                 )
                 
