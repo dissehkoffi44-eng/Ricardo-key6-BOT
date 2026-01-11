@@ -214,13 +214,10 @@ st.markdown("### Haute Précision & Intelligence Harmonique")
 files = st.file_uploader("📂 Déposer vos morceaux (MP3, WAV, FLAC)", type=['mp3','wav','flac'], accept_multiple_files=True)
 
 if files:
-    for f in files:
-        if files:
-    # --- AJOUTEZ CETTE LIGNE POUR INVERSER L'ORDRE ---
-    files = list(reversed(files)) 
+    # Inverser la liste pour traiter le dernier fichier en premier (affichage en haut)
+    files_to_process = list(reversed(files))
     
-    for f in files:
-        # Le reste de votre code reste identique...
+    for f in files_to_process:
         file_bytes = f.read()
         with st.spinner(f"Analyse haute précision de {f.name}..."):
             data = analyze_full_engine(file_bytes, f.name)
