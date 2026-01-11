@@ -19,7 +19,7 @@ CHAT_ID = st.secrets.get("CHAT_ID")
 
 # --- RÉFÉRENTIELS HARMONIQUES ---
 NOTES_LIST = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
-NOTES_ORDER = [f"{n} {m}" for n in NOTES_LIST for m in ['major', 'minor']]
+NOTES_ORDER = [f"{n} {m}" for n in NOTES_LIST for n in ['major', 'minor']]
 
 CAMELOT_MAP = {
     'C major': '8B', 'C# major': '3B', 'D major': '10B', 'D# major': '5B', 'E major': '12B', 'F major': '7B',
@@ -35,29 +35,22 @@ PROFILES = {
     }
 }
 
-# --- STYLES CSS (NETTOYAGE TOTAL : MENU, FOOTER, HEADER, SIDEBAR, MANAGE APP) ---
+# --- STYLES CSS (NETTOYAGE TOTAL) ---
 st.markdown("""
     <style>
-    /* 1. Masquer les éléments Streamlit standards */
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     header {visibility: hidden;}
     [data-testid="stSidebar"] {display: none;}
-    
-    /* 2. Masquer la barre "Manage App" et le badge Streamlit en bas à droite */
     .viewerBadge_container__1QSob {display: none !important;}
     #stConnectionStatus {display: none !important;}
     [data-testid="stStatusWidget"] {display: none !important;}
-    
-    /* 3. Optimisation de l'espace de travail */
     .block-container {
         padding-top: 2rem;
         padding-bottom: 0rem;
         padding-left: 3rem;
         padding-right: 3rem;
     }
-
-    /* 4. Styles des composants DJ's Ear */
     .report-card { 
         padding: 40px; border-radius: 25px; text-align: center; color: white; 
         border: 1px solid rgba(255,255,255,0.1); box-shadow: 0 10px 30px rgba(0,0,0,0.5);
@@ -92,17 +85,13 @@ def solve_key(chroma_vector, global_dom_root=None):
             for i in range(12):
                 rotated_profile = np.roll(p_data[mode], i)
                 corr_score = np.corrcoef(cv, rotated_profile)[0, 1]
-                
                 third_idx = (i + 3) % 12 if mode == "minor" else (i + 4) % 12
                 fifth_idx = (i + 7) % 12
-                
                 dom_bonus = 0
                 if global_dom_root is not None:
                     if (i + 7) % 12 == global_dom_root and cv[global_dom_root] > 0.35:
                         dom_bonus = 0.18
-
                 final_score = corr_score + (0.15 * cv[third_idx]) + (0.05 * cv[fifth_idx]) + dom_bonus
-
                 if final_score > best_score:
                     best_score = final_score
                     res = {"key": f"{NOTES_LIST[i]} {mode}", "score": corr_score}
@@ -112,38 +101,29 @@ def solve_key(chroma_vector, global_dom_root=None):
 def analyze_full_engine(file_bytes, file_name):
     with io.BytesIO(file_bytes) as b:
         y, sr = librosa.load(b, sr=22050, mono=True)
-    
     tuning = librosa.estimate_tuning(y=y, sr=sr)
     y_filt = apply_filters(y, sr)
-    
     chroma_complex = librosa.feature.chroma_cqt(y=y_filt, sr=sr, tuning=tuning, bins_per_octave=24, hop_length=512)
     global_chroma_avg = np.mean(chroma_complex, axis=1)
-    
     top_2_idx = np.argsort(global_chroma_avg)[-2:]
     n_p, n_s = top_2_idx[1], top_2_idx[0]
     global_dom_root = n_s if (n_p + 7) % 12 == n_s else (n_p if (n_s + 7) % 12 == n_p else None)
-
     duration = librosa.get_duration(y=y, sr=sr)
     step = 6 
     timeline = []
     votes = Counter()
-    
     for start in range(0, int(duration) - step, step):
         seg = y_filt[int(start*sr):int((start+step)*sr)]
         if np.max(np.abs(seg)) < 0.01: continue
-        
         c_seg = librosa.feature.chroma_cqt(y=seg, sr=sr, tuning=tuning, bins_per_octave=24)
         c_avg = np.mean(c_seg, axis=1)
         res = solve_key(c_avg, global_dom_root=global_dom_root)
-        
         weight = 1.5 if (start < 15 or start > (duration - 15)) else 1.0
         votes[res['key']] += int(res['score'] * 100 * weight)
         timeline.append({"Temps": start, "Note": res['key'], "Conf": res['score']})
-
     most_common = votes.most_common(2)
     main_key = most_common[0][0]
     main_conf = int(np.mean([t['Conf'] for t in timeline if t['Note'] == main_key]) * 100)
-    
     target_key, target_conf, modulation_detected = None, 0, False
     if len(most_common) > 1:
         second_key = most_common[1][0]
@@ -152,19 +132,15 @@ def analyze_full_engine(file_bytes, file_name):
             modulation_detected = True
             target_key = second_key
             target_conf = int(np.mean([t['Conf'] for t in timeline if t['Note'] == second_key]) * 100)
-
     _, y_perc = librosa.effects.hpss(y)
     tempo, _ = librosa.beat.beat_track(y=y_perc, sr=sr)
-    
     output = {
         "key": main_key, "camelot": CAMELOT_MAP.get(main_key, "??"),
-        "conf": main_conf,
-        "tempo": int(float(tempo)),
+        "conf": main_conf, "tempo": int(float(tempo)),
         "tuning_hz": round(440 * (2**(tuning/12)), 1),
         "pitch_offset": round(tuning, 2),
         "timeline": timeline, "chroma": global_chroma_avg,
-        "modulation": modulation_detected, 
-        "target_key": target_key,
+        "modulation": modulation_detected, "target_key": target_key,
         "target_conf": target_conf,
         "target_camelot": CAMELOT_MAP.get(target_key, "??") if target_key else None,
         "name": file_name
@@ -203,7 +179,6 @@ def send_telegram_expert(data, fig_timeline, fig_radar):
         mod_text = (f"⚠️ *MODULATION DÉTECTÉE*\n"
                     f"└ Vers : `{data['target_key']}` ({data['target_camelot']})\n"
                     f"└ Confiance Mod : `{data['target_conf']}%` \n\n")
-
     msg = (f"🎼 *DJ'S EAR PRO ELITE REPORT*\n"
            f"━━━━━━━━━━━━━━━━━━━━\n"
            f"📂 *Fichier:* `{data['name']}`\n\n"
@@ -235,21 +210,20 @@ files = st.file_uploader("📂 Déposer vos morceaux (MP3, WAV, FLAC)", type=['m
 
 if files:
     # Initialisation de la barre de progression globale
-    progress_bar = st.progress(0)
-    progress_text = st.empty()
+    main_progress_bar = st.progress(0)
+    progress_status = st.empty()
     
-    # Inverser la liste pour traiter le dernier fichier en premier
     files_to_process = list(reversed(files))
     total_files = len(files_to_process)
     
     for idx, f in enumerate(files_to_process):
-        # Mise à jour de la progression
-        current_progress = idx / total_files
-        progress_bar.progress(current_progress)
-        progress_text.markdown(f"**Progression globale : {int(current_progress * 100)}%** (Analyse de {f.name}...)")
+        # Mise à jour de la barre
+        percent_complete = int((idx / total_files) * 100)
+        main_progress_bar.progress(idx / total_files)
+        progress_status.markdown(f"**Analyse globale : {percent_complete}%** | Fichier actuel : `{f.name}`")
         
         file_bytes = f.read()
-        with st.spinner(f"Analyse haute précision de {f.name}..."):
+        with st.spinner(f"Analyse en cours... {f.name}"):
             data = analyze_full_engine(file_bytes, f.name)
         
         with st.expander(f"📊 ANALYSE TERMINÉE : {data['name']}", expanded=True):
@@ -270,7 +244,7 @@ if files:
                 st.markdown(f"<div class='metric-box' style='margin-top:10px;'><b>TUNING</b><br><span>{data['tuning_hz']} Hz ({data['pitch_offset']} cents)</span></div>", unsafe_allow_html=True)
             with c2:
                 btn_id = f"play_{hash(f.name)}"
-                st.markdown(f<center><b>TESTER L'ACCORD</b></center>", unsafe_allow_html=True)
+                st.markdown(f"<center><b>TESTER L'ACCORD</b></center>", unsafe_allow_html=True)
                 components.html(f"""<button id="{btn_id}" style="width:100%; height:110px; background:linear-gradient(90deg, #4F46E5, #7C3AED); color:white; border:none; border-radius:15px; cursor:pointer; font-weight:bold; font-size:1.2em; box-shadow:0 4px 15px rgba(0,0,0,0.3);">🎹 JOUER L'ACCORD</button><script>{get_piano_js(btn_id, data['key'])}</script>""", height=130)
             with c3:
                 if data['modulation']:
@@ -290,13 +264,12 @@ if files:
                 fig_r.update_layout(template="plotly_dark", title="Signature Chromatique", polar=dict(radialaxis=dict(visible=False)))
                 st.plotly_chart(fig_r, use_container_width=True)
 
-            # --- ENVOI AUTOMATIQUE TELEGRAM ---
             send_telegram_expert(data, fig_l, fig_r)
             st.toast(f"✅ Rapport Telegram envoyé pour {f.name}")
-
-    # Finalisation de la barre
-    progress_bar.progress(1.0)
-    progress_text.markdown("**✅ Analyse de tous les fichiers terminée à 100%**")
+    
+    # Fin des analyses
+    main_progress_bar.progress(100)
+    progress_status.markdown("**✅ Toutes les analyses sont terminées ! (100%)**")
 
     if st.button("🧹 Vider la mémoire"):
         st.cache_data.clear(); st.rerun()
