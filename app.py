@@ -128,7 +128,7 @@ def analyze_full_engine(file_bytes, file_name):
     if len(most_common) > 1:
         second_key = most_common[1][0]
         count_second = sum(1 for t in timeline if t['Note'] == second_key)
-        if count_second > (len(timeline) * 0.18): # Seuil légèrement ajusté
+        if count_second > (len(timeline) * 0.18): 
             modulation_detected = True
             target_key = second_key
             target_conf = int(np.mean([t['Conf'] for t in timeline if t['Note'] == second_key]) * 100)
@@ -177,10 +177,7 @@ def get_piano_js(button_id, key_name):
     """
 
 def send_telegram_expert(data, fig_timeline, fig_radar):
-    """Envoi un rapport complet avec texte formaté et graphiques"""
     if not TELEGRAM_TOKEN or not CHAT_ID: return
-
-    # 1. Préparation du texte
     mod_text = ""
     if data['modulation']:
         mod_text = (f"⚠️ *MODULATION DÉTECTÉE*\n"
@@ -199,14 +196,9 @@ def send_telegram_expert(data, fig_timeline, fig_radar):
            f"└ Tempo : `{data['tempo']} BPM`\n"
            f"└ Tuning : `{data['tuning_hz']} Hz` (`{data['pitch_offset']}`c)\n"
            f"━━━━━━━━━━━━━━━━━━━━")
-
     try:
-        # Envoi du texte
         requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
                      json={"chat_id": CHAT_ID, "text": msg, "parse_mode": "Markdown"})
-        
-        # Envoi des graphiques (exportés en BytesIO)
-        # Note: Nécessite pip install kaleido
         for fig, title in [(fig_timeline, "Flux"), (fig_radar, "Signature")]:
             img_bytes = fig.to_image(format="png", engine="kaleido")
             requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto", 
@@ -228,7 +220,6 @@ if files:
             data = analyze_full_engine(file_bytes, f.name)
         
         with st.expander(f"📊 ANALYSE TERMINÉE : {data['name']}", expanded=True):
-            # Header Report
             bg = "linear-gradient(135deg, #0f172a, #1e3a8a)" if not data['modulation'] else "linear-gradient(135deg, #1e1b4b, #7f1d1d)"
             st.markdown(f"""
                 <div class="report-card" style="background:{bg};">
@@ -242,7 +233,7 @@ if files:
             st.write("---")
             c1, c2, c3 = st.columns(3)
             with c1:
-                st.markdown(f<div class='metric-box'><b>TEMPO</b><br><span style='font-size:1.8em;'>{data['tempo']} BPM</span></div>", unsafe_allow_html=True)
+                st.markdown(f"<div class='metric-box'><b>TEMPO</b><br><span style='font-size:1.8em;'>{data['tempo']} BPM</span></div>", unsafe_allow_html=True)
                 st.markdown(f"<div class='metric-box' style='margin-top:10px;'><b>TUNING</b><br><span>{data['tuning_hz']} Hz ({data['pitch_offset']} cents)</span></div>", unsafe_allow_html=True)
             with c2:
                 btn_id = f"play_{hash(f.name)}"
@@ -256,7 +247,6 @@ if files:
                 else:
                     st.markdown("<div style='height:130px; display:flex; align-items:center; justify-content:center; opacity:0.3; border:2px dashed #444; border-radius:15px;'>Stabilité Harmonique</div>", unsafe_allow_html=True)
 
-            # Graphs
             gl, gr = st.columns([2, 1])
             with gl:
                 df_tl = pd.DataFrame(data['timeline'])
