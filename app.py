@@ -234,10 +234,20 @@ st.markdown("### Haute Précision & Intelligence Harmonique")
 files = st.file_uploader("📂 Déposer vos morceaux (MP3, WAV, FLAC)", type=['mp3','wav','flac'], accept_multiple_files=True)
 
 if files:
+    # Initialisation de la barre de progression globale
+    progress_bar = st.progress(0)
+    progress_text = st.empty()
+    
     # Inverser la liste pour traiter le dernier fichier en premier
     files_to_process = list(reversed(files))
+    total_files = len(files_to_process)
     
-    for f in files_to_process:
+    for idx, f in enumerate(files_to_process):
+        # Mise à jour de la progression
+        current_progress = idx / total_files
+        progress_bar.progress(current_progress)
+        progress_text.markdown(f"**Progression globale : {int(current_progress * 100)}%** (Analyse de {f.name}...)")
+        
         file_bytes = f.read()
         with st.spinner(f"Analyse haute précision de {f.name}..."):
             data = analyze_full_engine(file_bytes, f.name)
@@ -260,7 +270,7 @@ if files:
                 st.markdown(f"<div class='metric-box' style='margin-top:10px;'><b>TUNING</b><br><span>{data['tuning_hz']} Hz ({data['pitch_offset']} cents)</span></div>", unsafe_allow_html=True)
             with c2:
                 btn_id = f"play_{hash(f.name)}"
-                st.markdown(f"<center><b>TESTER L'ACCORD</b></center>", unsafe_allow_html=True)
+                st.markdown(f<center><b>TESTER L'ACCORD</b></center>", unsafe_allow_html=True)
                 components.html(f"""<button id="{btn_id}" style="width:100%; height:110px; background:linear-gradient(90deg, #4F46E5, #7C3AED); color:white; border:none; border-radius:15px; cursor:pointer; font-weight:bold; font-size:1.2em; box-shadow:0 4px 15px rgba(0,0,0,0.3);">🎹 JOUER L'ACCORD</button><script>{get_piano_js(btn_id, data['key'])}</script>""", height=130)
             with c3:
                 if data['modulation']:
@@ -283,6 +293,10 @@ if files:
             # --- ENVOI AUTOMATIQUE TELEGRAM ---
             send_telegram_expert(data, fig_l, fig_r)
             st.toast(f"✅ Rapport Telegram envoyé pour {f.name}")
+
+    # Finalisation de la barre
+    progress_bar.progress(1.0)
+    progress_text.markdown("**✅ Analyse de tous les fichiers terminée à 100%**")
 
     if st.button("🧹 Vider la mémoire"):
         st.cache_data.clear(); st.rerun()
