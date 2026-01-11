@@ -35,9 +35,24 @@ PROFILES = {
     }
 }
 
-# --- STYLES CSS ---
+# --- STYLES CSS (NETTOYAGE COMPLET STREAMLIT) ---
 st.markdown("""
     <style>
+    /* Masquer les éléments Streamlit par défaut */
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    header {visibility: hidden;}
+    [data-testid="stSidebar"] {display: none;}
+    
+    /* Réduction des marges pour un look 'App' */
+    .block-container {
+        padding-top: 1rem;
+        padding-bottom: 0rem;
+        padding-left: 2rem;
+        padding-right: 2rem;
+    }
+
+    /* Styles personnalisés */
     .report-card { 
         padding: 40px; border-radius: 25px; text-align: center; color: white; 
         border: 1px solid rgba(255,255,255,0.1); box-shadow: 0 10px 30px rgba(0,0,0,0.5);
@@ -264,7 +279,8 @@ if files:
             send_telegram_expert(data, fig_l, fig_r)
             st.toast(f"✅ Rapport Telegram envoyé pour {f.name}")
 
-    if st.sidebar.button("🧹 Vider la mémoire"):
+    # Le bouton pour vider la mémoire reste accessible via un bouton discret en bas si nécessaire
+    if st.button("🧹 Vider la mémoire"):
         st.cache_data.clear(); st.rerun()
 else:
     st.info("Prêt pour l'analyse profonde (24-bins + Tuning + V-i Logic).")
