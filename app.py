@@ -215,8 +215,9 @@ files = st.file_uploader("📂 Déposer vos morceaux (MP3, WAV, FLAC)", type=['m
 
 if files:
     for f in files:
+        files = list(reversed(files))
         file_bytes = f.read()
-        with st.spinner(f"Analyse spectrale profonde de {f.name}..."):
+        with st.spinner(f"Analyse haute précision de {f.name}..."):
             data = analyze_full_engine(file_bytes, f.name)
         
         with st.expander(f"📊 ANALYSE TERMINÉE : {data['name']}", expanded=True):
