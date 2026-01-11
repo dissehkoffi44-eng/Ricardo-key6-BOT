@@ -35,24 +35,29 @@ PROFILES = {
     }
 }
 
-# --- STYLES CSS (NETTOYAGE COMPLET STREAMLIT) ---
+# --- STYLES CSS (NETTOYAGE TOTAL : MENU, FOOTER, HEADER, SIDEBAR, MANAGE APP) ---
 st.markdown("""
     <style>
-    /* Masquer les éléments Streamlit par défaut */
+    /* 1. Masquer les éléments Streamlit standards */
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     header {visibility: hidden;}
     [data-testid="stSidebar"] {display: none;}
     
-    /* Réduction des marges pour un look 'App' */
+    /* 2. Masquer la barre "Manage App" et le badge Streamlit en bas à droite */
+    .viewerBadge_container__1QSob {display: none !important;}
+    #stConnectionStatus {display: none !important;}
+    [data-testid="stStatusWidget"] {display: none !important;}
+    
+    /* 3. Optimisation de l'espace de travail */
     .block-container {
-        padding-top: 1rem;
+        padding-top: 2rem;
         padding-bottom: 0rem;
-        padding-left: 2rem;
-        padding-right: 2rem;
+        padding-left: 3rem;
+        padding-right: 3rem;
     }
 
-    /* Styles personnalisés */
+    /* 4. Styles des composants DJ's Ear */
     .report-card { 
         padding: 40px; border-radius: 25px; text-align: center; color: white; 
         border: 1px solid rgba(255,255,255,0.1); box-shadow: 0 10px 30px rgba(0,0,0,0.5);
@@ -229,7 +234,7 @@ st.markdown("### Haute Précision & Intelligence Harmonique")
 files = st.file_uploader("📂 Déposer vos morceaux (MP3, WAV, FLAC)", type=['mp3','wav','flac'], accept_multiple_files=True)
 
 if files:
-    # Inverser la liste pour traiter le dernier fichier en premier (affichage en haut)
+    # Inverser la liste pour traiter le dernier fichier en premier
     files_to_process = list(reversed(files))
     
     for f in files_to_process:
@@ -279,7 +284,6 @@ if files:
             send_telegram_expert(data, fig_l, fig_r)
             st.toast(f"✅ Rapport Telegram envoyé pour {f.name}")
 
-    # Le bouton pour vider la mémoire reste accessible via un bouton discret en bas si nécessaire
     if st.button("🧹 Vider la mémoire"):
         st.cache_data.clear(); st.rerun()
 else:
