@@ -223,8 +223,9 @@ files = st.file_uploader("📂 Déposer vos morceaux (MP3, WAV, FLAC)", type=['m
 
 if files:
     for f in files:
+        file_bytes = f.read()
         with st.spinner(f"Analyse spectrale profonde de {f.name}..."):
-            data = analyze_full_engine(f.read(), f.name)
+            data = analyze_full_engine(file_bytes, f.name)
         
         with st.expander(f"📊 ANALYSE TERMINÉE : {data['name']}", expanded=True):
             # Header Report
@@ -241,7 +242,7 @@ if files:
             st.write("---")
             c1, c2, c3 = st.columns(3)
             with c1:
-                st.markdown(f"<div class='metric-box'><b>TEMPO</b><br><span style='font-size:1.8em;'>{data['tempo']} BPM</span></div>", unsafe_allow_html=True)
+                st.markdown(f<div class='metric-box'><b>TEMPO</b><br><span style='font-size:1.8em;'>{data['tempo']} BPM</span></div>", unsafe_allow_html=True)
                 st.markdown(f"<div class='metric-box' style='margin-top:10px;'><b>TUNING</b><br><span>{data['tuning_hz']} Hz ({data['pitch_offset']} cents)</span></div>", unsafe_allow_html=True)
             with c2:
                 btn_id = f"play_{hash(f.name)}"
@@ -266,10 +267,9 @@ if files:
                 fig_r.update_layout(template="plotly_dark", title="Signature Chromatique", polar=dict(radialaxis=dict(visible=False)))
                 st.plotly_chart(fig_r, use_container_width=True)
 
-            # Telegram Trigger
-            if st.button(f"🚀 Envoyer Rapport Expert Telegram ({f.name})"):
-                send_telegram_expert(data, fig_l, fig_r)
-                st.success("Rapport complet envoyé !")
+            # --- ENVOI AUTOMATIQUE TELEGRAM ---
+            send_telegram_expert(data, fig_l, fig_r)
+            st.toast(f"✅ Rapport Telegram envoyé pour {f.name}")
 
     if st.sidebar.button("🧹 Vider la mémoire"):
         st.cache_data.clear(); st.rerun()
