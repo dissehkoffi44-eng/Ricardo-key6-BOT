@@ -14,6 +14,7 @@ from scipy.signal import butter, lfilter
 # --- CONFIGURATION SYSTÈME ---
 st.set_page_config(page_title="DJ's Ear Pro Music Elite", page_icon="🎼", layout="wide")
 
+# Utilisation de .get() pour éviter les erreurs si les secrets ne sont pas configurés
 TELEGRAM_TOKEN = st.secrets.get("TELEGRAM_TOKEN")
 CHAT_ID = st.secrets.get("CHAT_ID")
 
@@ -38,23 +39,6 @@ PROFILES = {
 # --- STYLES CSS ---
 st.markdown("""
     <style>
-    /* Masquer les éléments Streamlit standards */
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    header {visibility: hidden;}
-    [data-testid="stSidebar"] {display: none;}
-    
-    .viewerBadge_container__1QSob {display: none !important;}
-    #stConnectionStatus {display: none !important;}
-    [data-testid="stStatusWidget"] {display: none !important;}
-    
-    .block-container {
-        padding-top: 2rem;
-        padding-bottom: 0rem;
-        padding-left: 3rem;
-        padding-right: 3rem;
-    }
-
     .report-card { 
         padding: 40px; border-radius: 25px; text-align: center; color: white; 
         border: 1px solid rgba(255,255,255,0.1); box-shadow: 0 10px 30px rgba(0,0,0,0.5);
@@ -231,6 +215,7 @@ st.markdown("### Haute Précision & Intelligence Harmonique")
 files = st.file_uploader("📂 Déposer vos morceaux (MP3, WAV, FLAC)", type=['mp3','wav','flac'], accept_multiple_files=True)
 
 if files:
+    # Inverser la liste pour traiter le dernier fichier en premier
     files_to_process = list(reversed(files))
     
     for f in files_to_process:
@@ -276,10 +261,11 @@ if files:
                 fig_r.update_layout(template="plotly_dark", title="Signature Chromatique", polar=dict(radialaxis=dict(visible=False)))
                 st.plotly_chart(fig_r, use_container_width=True)
 
+            # --- ENVOI AUTOMATIQUE TELEGRAM ---
             send_telegram_expert(data, fig_l, fig_r)
             st.toast(f"✅ Rapport Telegram envoyé pour {f.name}")
 
-    if st.button("🧹 Vider la mémoire"):
+    if st.sidebar.button("🧹 Vider la mémoire"):
         st.cache_data.clear(); st.rerun()
 else:
     st.info("Prêt pour l'analyse profonde (24-bins + Tuning + V-i Logic).")
