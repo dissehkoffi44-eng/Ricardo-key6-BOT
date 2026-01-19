@@ -117,7 +117,7 @@ def analyze_full_engine(file_bytes, file_name):
         c_avg = np.mean(c_seg, axis=1)
         res = solve_key(c_avg, global_dom_root=global_dom_root)
         
-        weight = 1.0
+        weight = 1.5 if (start < 15 or start > (duration - 15)) else 1.0
         votes[res['key']] += int(res['score'] * 100 * weight)
         timeline.append({"Temps": start, "Note": res['key'], "Conf": res['score']})
 
